@@ -1,38 +1,32 @@
 spring:
   application:
     name: ecom
-
-  # Database
+  profiles:
+    default: dev
   datasource:
-    url: jdbc:mysql://localhost:3306/ecom_db?useSSL=false&serverTimezone=UTC
-    username: root
-    password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
-
-  # JPA
+    hikari:
+      maximum-pool-size: 10
   jpa:
-    show-sql: true
+    show-sql: false
     hibernate:
-      ddl-auto: none       # Flyway quản lý schema — không để Hibernate tự tạo
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
-
-  # Flyway
+      ddl-auto: none
   flyway:
-    enabled: false          # Tắt auto-config, FlywayConfig.java tự quản lý
+    enabled: true
     locations: classpath:db/migration
-
-  # Redis
+    validate-on-migrate: true
+    out-of-order: false
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
       use-redis-cache: true
-
-  # Kafka
+      use-redisson: true
+      timeout: 3s
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
@@ -41,80 +35,78 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
       group-id: ecom_db-group
       auto-offset-reset: earliest
-
-  # OAuth2
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:}
+    properties:
+      mail.smtp:
+        auth: true
+        starttls.enable: true
+        connectiontimeout: 5000
+        timeout: 5000
+        writetimeout: 5000
   security:
     oauth2:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_CLIENT_ID:your-google-client-id}
-            client-secret: ${GOOGLE_CLIENT_SECRET:your-google-client-secret}
+            client-id: ${GOOGLE_CLIENT_ID:local-disabled}
+            client-secret: ${GOOGLE_CLIENT_SECRET:local-disabled}
             redirect-uri: "${GOOGLE_REDIRECT_URI:http://localhost:4300/auth/google/callback}"
             user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
-            resource-server:
-              opaque-token:
-                introspection-uri: https://www.googleapis.com/oauth2/v3
           facebook:
-            client-id: ${FACEBOOK_CLIENT_ID:your-facebook-client-id}
-            client-secret: ${FACEBOOK_CLIENT_SECRET:your-facebook-client-secret}
+            client-id: ${FACEBOOK_CLIENT_ID:local-disabled}
+            client-secret: ${FACEBOOK_CLIENT_SECRET:local-disabled}
             redirect-uri: "${FACEBOOK_REDIRECT_URI:http://localhost:4300/auth/facebook/callback}"
             token-uri: https://graph.facebook.com/v13.0/oauth/access_token
             user-info-uri: https://graph.facebook.com/me?fields=id,name,email,picture
-
-  # File upload
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
-
-  # i18n
   messages:
     basename: i18n/messages
     encoding: UTF-8
     default-locale: en
-
-  # Thymeleaf
-  thymeleaf:
-    prefix: classpath:/templates/
-    suffix: .html
-    mode: HTML
-
-# JWT — phải ở root level
 jwt:
-  expiration: 2592000              # 30 ngày (giây)
-  expiration-refresh-token: 31536000  # 365 ngày (giây)
-  secretKey: TaqlmGv1iEDMRiFp/pHuID1+T84IABfuA0xXh4GhiUI=
-
-# API prefix — phải ở root level
+  expiration: 2592000
+  expiration-refresh-token: 31536000
 api:
   prefix: /api/v1
-
-# Logging
-logging:
-  level:
-    org:
-      springframework.security: DEBUG
-
-# Swagger / OpenAPI
+server:
+  port: ${SERVER_PORT:8080}
+  forward-headers-strategy: none
+app:
+  rate-limit:
+    enabled: true
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
   api-docs:
     path: /api-docs
-  show-actuator: true
-
-# Actuator / Health check — phải ở root level
 management:
+  health:
+    mail:
+      enabled: ${MAIL_ENABLED:false}
   endpoint:
     health:
-      show-details: always
-      show-components: always
+      show-details: when-authorized
+      show-components: when-authorized
+      roles: ADMIN
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,redisCustom,kafkaCustom
   endpoints:
     web:
       base-path: /api/v1/actuator
       exposure:
-        include: "health, info, metrics, prometheus"
+        include: health,info,metrics,prometheus
   info:
     build:
       enabled: true
@@ -128,12 +120,10 @@ management:
       percentiles-histogram:
         http.server.requests: true
       percentiles:
-        http.server.requests: 0.5, 0.95, 0.99
-
-# VNPay
+        http.server.requests: 0.5,0.95,0.99
 vnpay:
-  pay-url: "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
+  pay-url: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
   return-url: "${VNPAY_RETURN_URI:http://localhost:4200/payments/payment-callback}"
-  tmn-code: "OMZF7JB7"
-  secret-key: "J6S80U7KQ2LKSIK0Q8QJK6K8LVVGPUVD"
-  api-url: "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction"
+  tmn-code: ${VNPAY_TMN_CODE:disabled}
+  secret-key: ${VNPAY_SECRET_KEY:disabled}
+  api-url: https://sandbox.vnpayment.vn/merchant_webapi/api/transaction

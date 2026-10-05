@@ -21,6 +21,7 @@ import com.manh.ecom_be.utils.FileUtils;
 import com.manh.ecom_be.utils.MessageKeys;
 import com.manh.ecom_be.utils.ValidationUtils;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -50,6 +51,7 @@ public class UserController {
     private final InterfaceTokenService tokenService;
     private final InterfaceAuthService authService;
     private final SecurityUtils securityUtils;
+    private final com.manh.ecom_be.services.user.ProfileImageService profileImageService;
 
     private String facebookClientSecret;
 
@@ -130,7 +132,7 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(loginResponse, "Login successfully"));
     }
 
-    // private - được gọi nội bộ từ callback()
+    // private - Ä‘Æ°á»£c gá»i ná»™i bá»™ tá»« callback()
     private ResponseEntity<ApiResponse<LoginResponse>> loginSocial(
             @Valid @RequestBody UserLoginDTO userLoginDTO,
             HttpServletRequest request
@@ -154,14 +156,14 @@ public class UserController {
     }
 
     private boolean isMobileDevice(String userAgent) {
-        return userAgent.toLowerCase().contains("mobile");
+        return userAgent != null && userAgent.toLowerCase().contains("mobile");
     }
 
     @PostMapping("/refreshToken")
     public ResponseEntity<ApiResponse<LoginResponse>> refreshToken(
             @Valid @RequestBody RefreshTokenDTO refreshTokenDTO) throws Exception {
-        User userDetail = userService.getUserDetailsFromRefreshToken(refreshTokenDTO.getRefreshToken());
-        Token jwtToken = tokenService.refreshToken(refreshTokenDTO.getRefreshToken(), userDetail);
+        Token jwtToken = tokenService.refreshToken(refreshTokenDTO.getRefreshToken());
+        User userDetail = jwtToken.getUser();
 
         LoginResponse loginResponse = LoginResponse.builder()
                 .token(jwtToken.getToken())
@@ -193,12 +195,7 @@ public class UserController {
             @RequestBody UpdateUserDTO updatedUserDTO,
             @RequestHeader("Authorization") String authorizationHeader
     ) throws Exception {
-        String extractedToken = authorizationHeader.substring(7);
-        User user = userService.getUserDetailsFromToken(extractedToken);
-        if (user.getId() != userId) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ApiResponse.error(HttpStatus.FORBIDDEN, "You do not have permission to update this user"));
-        }
+        securityUtils.requireSelf(userId);
         User updatedUser = userService.updateUser(userId, updatedUserDTO);
         return ResponseEntity.ok(ApiResponse.success(UserResponse.fromUser(updatedUser), "Update user detail successfully"));
     }
@@ -235,7 +232,7 @@ public class UserController {
     public ResponseEntity<ApiResponse<?>> uploadProfileImage(
             @RequestParam("file") MultipartFile file
     ) throws Exception {
-        User loginUser = securityUtils.getLoggedInUser();
+        securityUtils.requireUser();
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(
                     ApiResponse.error(HttpStatus.BAD_REQUEST, "Image file is required."));
@@ -245,41 +242,15 @@ public class UserController {
                     .body(ApiResponse.error(HttpStatus.PAYLOAD_TOO_LARGE,
                             "Image file size exceeds the allowed limit of 10MB."));
         }
-        if (!FileUtils.isImageFile(file)) {
-            return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
-                    .body(ApiResponse.error(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-                            "Uploaded file must be an image."));
-        }
-
-        String oldFileName = loginUser.getProfileImage();
-        String imageName = FileUtils.storeFile(file);
-        userService.changeProfileImage(loginUser.getId(), imageName);
-        if (!StringUtils.isEmpty(oldFileName)) {
-            FileUtils.deleteFile(oldFileName);
-        }
+        String imageName = profileImageService.replace(file);
 
         return ResponseEntity.ok(ApiResponse.created(imageName, "Upload profile image successfully"));
     }
 
     @GetMapping("/profile-images/{imageName}")
     public ResponseEntity<?> viewImage(@PathVariable String imageName) {
-        try {
-            java.nio.file.Path imagePath = Paths.get("uploads/" + imageName);
-            UrlResource resource = new UrlResource(imagePath.toUri());
-            if (resource.exists()) {
-                return ResponseEntity.ok()
-                        .contentType(MediaType.IMAGE_JPEG)
-                        .body(resource);
-            } else {
-                return ResponseEntity.ok()
-                        .contentType(MediaType.IMAGE_JPEG)
-                        .body(new UrlResource(Paths.get("uploads/default-profile-image.jpeg").toUri()));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.notFound().build();
-        }
+        return FileUtils.imageResponse(imageName);
     }
-
     @GetMapping("/auth/social-login")
     public ResponseEntity<String> socialAuth(
             @RequestParam("login_type") String loginType,
@@ -347,3 +318,4 @@ public class UserController {
         return this.loginSocial(userLoginDTO, request);
     }
 }
+

@@ -1,0 +1,83 @@
+### Demo local COD. Thay các biến bằng dữ liệu của môi trường test riêng.
+### Không commit token/mật khẩu thật; dùng biến môi trường riêng của HTTP client.
+@baseUrl = http://localhost:8080/api/v1
+@phone = 0900000001
+@password = REPLACE_WITH_LOCAL_DEMO_PASSWORD
+@buyerToken = REPLACE_WITH_BUYER_ACCESS_TOKEN
+@adminToken = REPLACE_WITH_ADMIN_ACCESS_TOKEN
+@refreshToken = REPLACE_WITH_BUYER_REFRESH_TOKEN
+@categoryId = 1
+@productId = 1
+@orderId = 1
+@buyerId = 1
+
+### 1. Public health: status, không có components/details
+GET {{baseUrl}}/actuator/health
+
+### 2. Public catalog; đọc totalPages trong body
+GET {{baseUrl}}/products?page=0&limit=10&category_id=0
+
+### 3. Public categories; đọc X-Total-Count/X-Total-Pages trong header
+GET {{baseUrl}}/categories?page=0&limit=10
+
+### 4. Register USER (chỉ dùng số điện thoại/email chưa tồn tại)
+POST {{baseUrl}}/users/register
+Content-Type: application/json
+
+{"fullname":"Fresher demo","phone_number":"{{phone}}","email":"fresher-demo@example.test","password":"{{password}}","retype_password":"{{password}}","role_id":1}
+
+### 5. Login: chép token, refresh_token và id vào biến riêng
+POST {{baseUrl}}/users/login
+Content-Type: application/json
+
+{"phone_number":"{{phone}}","password":"{{password}}"}
+
+### 6. ADMIN tạo sản phẩm trong category đã có; không gửi thumbnail
+POST {{baseUrl}}/products
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"name":"Demo inventory","price":100000.00,"category_id":{{categoryId}},"stock_quantity":5,"description":"COD interview demo"}
+
+### 7. USER tạo đơn COD; server tự lấy user/giá. Chép id trả về vào orderId
+POST {{baseUrl}}/orders
+Authorization: Bearer {{buyerToken}}
+Content-Type: application/json
+
+{"user_id":{{buyerId}},"phone_number":"{{phone}}","address":"Local demo address","payment_method":"cod","cart_items":[{"product_id":{{productId}},"quantity":1}]}
+
+### 8. USER đọc đơn của mình
+GET {{baseUrl}}/orders/{{orderId}}
+Authorization: Bearer {{buyerToken}}
+
+### 9. Chi tiết đơn có tên/thumbnail snapshot
+GET {{baseUrl}}/order-details/order/{{orderId}}
+Authorization: Bearer {{buyerToken}}
+
+### 10. USER hủy đơn pending, tồn kho được hoàn lại
+PUT {{baseUrl}}/orders/cancel/{{orderId}}
+Authorization: Bearer {{buyerToken}}
+
+### 11. Refresh rotation: cập nhật cả access/refresh token sau thành công
+POST {{baseUrl}}/users/refreshToken
+Content-Type: application/json
+
+{"refreshToken":"{{refreshToken}}"}
+
+### 12. Gửi lại refresh cũ phải bị từ chối; dùng USER token đọc metrics phải 403
+GET {{baseUrl}}/actuator/metrics
+Authorization: Bearer {{buyerToken}}
+
+### 13. ADMIN đọc metrics
+GET {{baseUrl}}/actuator/prometheus
+Authorization: Bearer {{adminToken}}
+
+### 14. Case validation: 400 trước khi đọc cache/database
+GET {{baseUrl}}/products?page=0&limit=100000
+
+### 15. VNPay bị tắt mặc định: authenticated request nhận 404
+POST {{baseUrl}}/payments/refund
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{}

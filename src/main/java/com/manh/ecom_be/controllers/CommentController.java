@@ -46,12 +46,7 @@ public class CommentController {
             @PathVariable("id") Long commentId,
             @Valid @RequestBody CommentDTO commentDTO
     ) throws Exception {
-        User loginUser = securityUtils.getLoggedInUser();
 
-        if (!Objects.equals(loginUser.getId(), commentDTO.getUserId())) {
-            return ResponseEntity.badRequest().body(
-                    ApiResponse.error(HttpStatus.BAD_REQUEST, "You cannot update another user's comment"));
-        }
 
         commentService.updateComment(commentId, commentDTO);
         return ResponseEntity.ok(ApiResponse.success(null, "Update comment successfully"));
@@ -62,12 +57,7 @@ public class CommentController {
     public ResponseEntity<ApiResponse<?>> insertComment(
             @Valid @RequestBody CommentDTO commentDTO
     ) {
-        User loginUser = securityUtils.getLoggedInUser();
 
-        if (!Objects.equals(loginUser.getId(), commentDTO.getUserId())) {
-            return ResponseEntity.badRequest().body(
-                    ApiResponse.error(HttpStatus.BAD_REQUEST, "You cannot comment as another user"));
-        }
         commentService.insertComment(commentDTO);
         return ResponseEntity.ok(ApiResponse.success(null, "Insert comment successfully"));
     }

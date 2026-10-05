@@ -1,119 +1,183 @@
-# Ecom BE - Standalone Spring Boot E-Commerce Backend
+# Ecom BE
 
-This repository contains the standalone, headless Backend (API-Only) of the E-Commerce application. It is built using Spring Boot 3.3.5 and Java 21, implementing modern architectural patterns for high-performance and secure online shopping.
+[![CI](https://github.com/manhtw0ne/ecom_be/actions/workflows/ci.yml/badge.svg)](https://github.com/manhtw0ne/ecom_be/actions/workflows/ci.yml)
+[![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.5-6DB33F?logo=springboot)](https://spring.io/projects/spring-boot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
----
+Production-ready e-commerce REST API built with **Java 21** and **Spring Boot 3.3.5**.
 
-## 🚀 Key Features & Technical Implementations
-
-The backend is designed as an API-first service containing the following core systems:
-
-### 1. Database & Schema Migration (Flyway)
-- **Database:** MySQL to manage products, categories, orders, order details, tokens, coupons, comments, and roles.
-- **Migration:** Integrated **Flyway Migration** to version-control the database schema, ensuring smooth, automated schema creation and updates (`src/main/resources/db/migration`).
-
-### 2. High-Performance Caching (Redis)
-- **Strategy:** Cache-Aside strategy using Lettuce client configuration.
-- **Implementation:** Product listings are cached in Redis to drastically reduce database query overhead.
-- **Cache Synchronization:** Integrated **JPA Entity Lifecycle Listeners** (`@PostPersist`, `@PostUpdate`, `@PostRemove`) in `ProductListener` to automatically flush/invalidate product cache whenever catalog modifications occur.
-
-### 3. Authentication & Authorization (Spring Security 6 & JJWT)
-- **JWT Authentication:** Configured stateless request validation via a custom `JwtTokenFilter` using **JJWT 0.12.5** for token signing and validation.
-- **Refresh Token Strategy:** Secure refresh token flow storing tokens in the `tokens` table with revocation and expiration checks.
-- **Multi-Identifier Login:** Custom `UserDetailsService` allowing users to log in using either their **Phone Number** or **Email**.
-- **Social Login:** Configured Google OAuth2 with custom `GoogleOpaqueTokenIntrospector` for API-only token validation.
-
-### 4. Online Payment Gateway (VNPay Sandbox)
-- **Flow:** Generates signed payment URLs with HMAC-SHA512 digital signatures.
-- **Status Sync:** Handles IPN / Payment Callback responses to securely update order status (from `pending` to `shipped` or `delivered`).
-
-### 5. Event-Driven Messaging (Apache Kafka)
-- **Architecture:** Asynchronous messaging to publish Category events (`insert-a-category`, `get-all-categories`).
-- **Consumer:** Lobbies messages via `@KafkaListener` to perform background logging/audit logging.
-
-### 6. Flexible Coupon Engine (EAV Pattern)
-- **Design:** Implemented the **Entity-Attribute-Value (EAV)** pattern to dynamically compute shopping cart discounts based on varying coupon conditions (e.g., minimum order value, specific categories).
-
-### 7. Diagnostics, API Docs & Internationalization
-- **OpenAPI / Swagger:** Auto-generates interactive API documentations at Swagger UI.
-- **Spring Boot Actuator:** Out-of-the-box endpoints for system health status.
-- **i18n:** Multi-language support for Vietnamese (vi) and English (en) localized API error responses.
+> **Live Demo:** [https://ecom-be.onrender.com/swagger-ui.html](https://ecom-be.onrender.com/swagger-ui.html) *(may take 30s to wake up on free tier)*
 
 ---
 
-## 🛠️ Local Development Setup
+## Tech Stack
 
-### 1. Prerequisites
-- **Java Development Kit (JDK) 21**
-- **Docker Desktop**
-- **MySQL Server** (running locally or via Docker)
+| Layer | Technology |
+|---|---|
+| Language | Java 21 (LTS) |
+| Framework | Spring Boot 3.3.5 |
+| Security | Spring Security, JWT, OAuth2 (Google, Facebook) |
+| Database | MySQL 8 + Flyway migrations |
+| Cache | Redis + Redisson (distributed lock) |
+| Messaging | Apache Kafka |
+| Monitoring | Prometheus + Grafana |
+| Rate Limiting | Bucket4j (Redis-backed) |
+| Payment | VNPay integration |
+| Documentation | SpringDoc OpenAPI 3 (Swagger UI) |
+| Containerization | Docker + Docker Compose |
 
-### 2. Spin Up Infrastructure (Redis & Kafka)
-Run the following command at the root directory to launch background Docker containers for Redis, Zookeeper, and Kafka:
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Client["Web / Mobile Client"] --> RateLimit["Rate Limiter\n(Bucket4j + Redis)"]
+  RateLimit --> Security["Spring Security\n(JWT / OAuth2)"]
+  Security --> Controllers["REST Controllers"]
+  Controllers --> Services["Business Services"]
+  Services --> DB[(MySQL\nFlyway)]
+  Services --> Cache[(Redis\nCache + Lock)]
+  Services --> Kafka[Kafka\nEvents]
+  Services --> AfterCommit["After-Commit\nHook"]
+  AfterCommit --> Email["Async Email\n(SMTP)"]
+  Controllers --> Actuator["Actuator\n/health /metrics"]
+  Prometheus --> Actuator
+  Grafana --> Prometheus
+```
+
+---
+
+## Features
+
+- **Authentication:** JWT login + Google/Facebook OAuth2 — access and refresh token flow
+- **Products:** CRUD, image upload, Redis caching (TTL 5 min), category filter, keyword search
+- **Orders:** Full lifecycle (PENDING → PROCESSING → SHIPPED → DELIVERED), cancel with stock restore
+- **Inventory:** Stock tracking with pessimistic lock + Redisson distributed lock (anti-overselling)
+- **Payment:** VNPay integration with sandbox support
+- **Rate Limiting:** 10 req/min for login/register (brute-force guard), 60 req/min for public APIs
+- **Monitoring:** Custom business metrics, Prometheus endpoint, pre-built Grafana dashboard
+- **Email:** Async order confirmation via dedicated thread pool, isolated from transaction
+- **Security:** CORS, security headers, BCrypt passwords, JWT validation filter chain
+
+---
+
+## Quick Start (Docker — recommended)
+
+Requires Docker Desktop.
+
 ```bash
+git clone https://github.com/manhtw0ne/ecom_be
+cd ecom_be
+docker compose up -d --build --wait
+```
+
+| Service | URL |
+|---|---|
+| API Base | http://localhost:8080/api/v1 |
+| **Swagger UI** | **http://localhost:8080/swagger-ui.html** |
+| Health | http://localhost:8080/api/v1/actuator/health |
+| Grafana | http://localhost:3000 (admin / local-grafana-password) |
+| Prometheus | http://localhost:9090 |
+
+> Flyway runs migrations automatically on startup. No manual SQL import needed.
+
+---
+
+## Local Development (without Docker)
+
+```bash
+# 1. Start infrastructure (MySQL, Redis, Kafka)
 docker compose -f docker-compose-infra.yml up -d
+
+# 2. Run the application in dev mode
+./mvnw spring-boot:run
+
+# Or use the helper script (Windows PowerShell)
+pwsh -File scripts/dev.ps1 run
 ```
 
-### 3. Configure Database
-Update connection strings, username, and password in [application.yml](file:///d:/Desktop/ecom_be/src/main/resources/application.yml) if your local MySQL settings differ:
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/ecom_db?useSSL=false&serverTimezone=UTC
-    username: root
-    password: your_password
-```
-
-### 4. Run the Application
-Run the Spring Boot application using Maven:
-- **Windows (PowerShell):**
-  ```powershell
-  $env:SERVER_PORT="8088"
-  .\mvnw.cmd spring-boot:run
-  ```
-- **macOS/Linux:**
-  ```bash
-  export SERVER_PORT="8088"
-  ./mvnw spring-boot:run
-  ```
+Default dev database: `jdbc:mysql://localhost:3306/ecom_db` (root/root).  
+Override with `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` environment variables.
 
 ---
 
-## 📝 API Endpoints & Verification
+## API Overview
 
-Once the server starts, you can inspect and interact with the REST APIs directly:
+Explore the full API at **Swagger UI** after starting the app. Key endpoints:
 
-- **Swagger UI (Interactive Docs):** [http://localhost:8088/swagger-ui/index.html](http://localhost:8088/swagger-ui/index.html)
-- **Actuator Health Endpoint:** [http://localhost:8088/actuator/health](http://localhost:8088/actuator/health)
+```
+POST   /api/v1/users/register    Register new user
+POST   /api/v1/users/login       Login → returns JWT token
+
+GET    /api/v1/products          List products (paginated, cached)
+GET    /api/v1/products/{id}     Product detail
+POST   /api/v1/products          Create product (ADMIN)
+PUT    /api/v1/products/{id}     Update product (ADMIN)
+
+POST   /api/v1/orders            Place order (requires JWT)
+GET    /api/v1/orders/{id}       Order detail
+PUT    /api/v1/orders/{id}       Update order status (ADMIN)
+DELETE /api/v1/orders/{id}       Cancel order
+
+GET    /api/v1/categories        List categories
+POST   /api/v1/categories        Create category (ADMIN)
+```
+
+### Quick API test with curl
+
+```bash
+# Register
+curl -X POST http://localhost:8080/api/v1/users/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"Password1!","retype_password":"Password1!","role_id":1}'
+
+# Login
+curl -X POST http://localhost:8080/api/v1/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"Password1!","role_id":1}'
+
+# List products (public)
+curl http://localhost:8080/api/v1/products?page=0&limit=10
+```
 
 ---
 
-## 📂 Project Directory Structure
+## Testing
 
+```bash
+# Unit/HTTP tests (H2; no external services required)
+./mvnw test
+
+# Tests + JaCoCo coverage report (minimum 70% enforced)
+./mvnw verify
+
+# Integration tests (requires MySQL + Redis via Docker)
+docker compose -f docker-compose.test.yml up -d --wait
+./mvnw verify -Pintegration
+docker compose -f docker-compose.test.yml down -v
 ```
-ecom_be/
-│
-├── src/
-│   ├── main/
-│   │   ├── java/com/manh/ecom_be/
-│   │   │   ├── configurations/   # Spring Security, Redis, Kafka, OpenAPI configs
-│   │   │   ├── controllers/      # REST API Controllers (endpoints)
-│   │   │   ├── services/         # Business logic layer
-│   │   │   ├── repositories/     # Database access layer (Spring Data JPA)
-│   │   │   ├── models/           # JPA Entities (DB mappings)
-│   │   │   ├── dtos/             # Data Transfer Objects
-│   │   │   ├── responses/        # API Response formats
-│   │   │   ├── filters/          # JwtTokenFilter
-│   │   │   └── exceptions/       # Custom Exception & RestControllerAdvice
-│   │   │
-│   │   └── resources/
-│   │       ├── db/migration/     # Flyway SQL migration scripts
-│   │       ├── i18n/             # Localized translation properties
-│   │       └── application.yml   # Spring Boot application configuration
-│   │
-│   └── test/                     # Integration and Unit tests
-│
-├── docker-compose-infra.yml      # Redis, Kafka, Zookeeper docker compose
-├── pom.xml                       # Maven dependency manager
-└── backend_learning_roadmap.md   # Step-by-step roadmap and practice guide
-```
+
+Coverage report after `verify`: `target/site/jacoco/index.html`
+
+---
+
+## Dashboard
+
+![Grafana Dashboard](docs/images/grafana-dashboard.png)
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust values for local development.  
+Production requires at minimum: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`.
+
+See `docs/architecture/` for detailed design decisions.
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.

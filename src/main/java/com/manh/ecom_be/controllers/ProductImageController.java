@@ -27,9 +27,6 @@ public class ProductImageController {
             @PathVariable Long id
     ) throws Exception {
         ProductImage productImage = productImageService.deleteProductImage(id);
-        if (productImage != null) {
-            FileUtils.deleteFile(productImage.getImageUrl());
-        }
         return ResponseEntity.ok(ApiResponse.success(productImage, "Delete product image successfully"));
     }
 }

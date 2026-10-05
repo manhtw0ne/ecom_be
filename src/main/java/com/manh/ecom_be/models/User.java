@@ -43,6 +43,7 @@ public class User extends BaseEntity implements UserDetails, OAuth2User {
     private String profileImage;
 
     @Column(name = "password", length = 200, nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String password;
 
     @Column(name = "is_active")

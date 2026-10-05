@@ -35,3 +35,7 @@ build/
 ### Custom Local Excludes ###
 src/main/resources/logs/
 uploads/
+logs/
+.env
+monitoring/secrets/*
+!monitoring/secrets/.gitkeep

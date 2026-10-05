@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("${api.prefix}/payments")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "app.payments.vnpay.enabled", havingValue = "true")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
 public class PaymentController {
     private final VNPayService vnPayService;
     private final BusinessMetrics businessMetrics;

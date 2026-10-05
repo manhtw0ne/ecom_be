@@ -11,7 +11,8 @@ import java.util.List;
 
 public interface InterfaceOrderService {
     Order createOrder(OrderDTO orderDTO) throws Exception;
-    Order getOrderById(Long orderId);
+    Order getOrderById(Long orderId) throws DataNotFoundException;
+    Order cancelOrder(Long id) throws DataNotFoundException;
     Order updateOrder(Long id, OrderDTO orderDTO) throws DataNotFoundException;
     void deleteOrder(Long orderId);
     List<OrderResponse> findByUserId(Long userId);

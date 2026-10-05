@@ -11,7 +11,10 @@ scrape_configs:
     # NOTE: host.docker.internal allows Prometheus container to reach
     # the Spring Boot app running on the host machine
     metrics_path: "/api/v1/actuator/prometheus"
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/actuator.token
     static_configs:
-      - targets: ["host.docker.internal:8088"]
+      - targets: ["host.docker.internal:8080"]
         labels:
           application: "ecom-be"

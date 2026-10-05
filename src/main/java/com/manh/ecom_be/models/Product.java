@@ -1,5 +1,7 @@
 package com.manh.ecom_be.models;
 
+import java.math.BigDecimal;
+
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
@@ -11,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "products")
 @Getter
 @Setter
@@ -28,7 +31,12 @@ public class Product extends BaseEntity {
     @Column(name = "name", nullable = false, length = 350)
     private String name;
 
-    private Float price;
+    @Column(name = "price", precision = 19, scale = 2)
+    private BigDecimal price;
+
+    @Column(name = "stock_quantity", nullable = false)
+    @Builder.Default
+    private int stockQuantity = 0;
 
     @Column(name = "thumbnail", length = 300)
     private String thumbnail;
@@ -47,14 +55,17 @@ public class Product extends BaseEntity {
     @OneToMany(mappedBy = "product",
             cascade = CascadeType.ALL,
             fetch = FetchType.LAZY)
+    @org.hibernate.annotations.BatchSize(size = 100)
     private List<ProductImage> productImages;
 
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL)
     @JsonManagedReference
+    @org.hibernate.annotations.BatchSize(size = 100)
     private List<Comment> comments = new ArrayList<>();
 
     @OneToMany(mappedBy = "product",
             cascade = CascadeType.ALL,
             fetch = FetchType.LAZY)
+    @org.hibernate.annotations.BatchSize(size = 100)
     private List<Favorite> favorites = new ArrayList<>();
 }

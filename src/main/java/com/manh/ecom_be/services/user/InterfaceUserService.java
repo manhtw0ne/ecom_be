@@ -13,7 +13,7 @@ public interface InterfaceUserService {
     User createUser(UserDTO userDTO) throws Exception;
     String login(UserLoginDTO userLoginDTO) throws Exception;
     User getUserDetailsFromToken(String token) throws Exception;
-    User getUserDetailsFromRefreshToken(String token) throws Exception;
+
     User updateUser(Long userId, UpdateUserDTO dto) throws Exception;
 
     Page<User> findAll(String keyword, Pageable pageable);

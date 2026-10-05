@@ -44,6 +44,7 @@ public class BusinessMetrics {
 
         this.productSearchTimer = Timer.builder("ecom.products.search")
                 .description("Product search query duration")
+                .publishPercentileHistogram()
                 .register(registry);
     }
 

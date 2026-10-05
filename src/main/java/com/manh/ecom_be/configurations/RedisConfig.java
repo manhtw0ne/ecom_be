@@ -1,67 +1,34 @@
 package com.manh.ecom_be.configurations;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
-import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.manh.ecom_be.models.Category;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.support.NoOpCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import java.time.Duration;
+import java.util.List;
 
 @Configuration
+@EnableCaching
 public class RedisConfig {
-    private static final Logger logger = LoggerFactory.getLogger(RedisConfig.class);
-
-
-    @Value("${spring.data.redis.host}")
-    private String redisHost;
-
-    @Value("${spring.data.redis.port}")
-    private int redisPort;
-
     @Bean
-    public LettuceConnectionFactory redisConnectionFactory() {
-        logger.info(String.format("redisHost = %s, redisPort = %d", redisHost, redisPort));
-        RedisStandaloneConfiguration configuration =
-                new RedisStandaloneConfiguration(redisHost, redisPort);
-        return new LettuceConnectionFactory(configuration);
-    }
-
-    @Bean
-    public RedisTemplate<String, Object> redisTemplate() {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
-        template.setConnectionFactory(redisConnectionFactory());
-
-        template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(new Jackson2JsonRedisSerializer<>(Object.class));
-
-        template.setHashKeySerializer(new StringRedisSerializer());
-        template.setHashValueSerializer(new Jackson2JsonRedisSerializer<>(Object.class));
-        return template;
-    }
-
-    @Bean
-    public ObjectMapper redisObjectMapper() {
-        ObjectMapper objectMapper = new ObjectMapper();
-        SimpleModule module = new SimpleModule();
-        module.addSerializer(LocalDateTime.class, new LocalDateTimeSerializer(DateTimeFormatter.ISO_DATE_TIME));
-        module.addDeserializer(LocalDateTime.class, new LocalDateTimeDeserializer(DateTimeFormatter.ISO_DATE_TIME));
-        objectMapper.registerModule(module);
-        return objectMapper;
+    CacheManager cacheManager(RedisConnectionFactory connectionFactory, ObjectMapper objectMapper,
+                              @Value("${spring.data.redis.use-redis-cache:true}") boolean enabled) {
+        if (!enabled) return new NoOpCacheManager();
+        Jackson2JsonRedisSerializer<List<Category>> serializer = new Jackson2JsonRedisSerializer<>(
+                objectMapper, objectMapper.getTypeFactory().constructCollectionType(List.class, Category.class));
+        RedisCacheConfiguration categories = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(10)).disableCachingNullValues()
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(serializer));
+        return RedisCacheManager.builder(connectionFactory)
+                .withCacheConfiguration("categories", categories).transactionAware().build();
     }
 }

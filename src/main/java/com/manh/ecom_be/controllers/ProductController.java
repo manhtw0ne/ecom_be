@@ -1,5 +1,7 @@
 package com.manh.ecom_be.controllers;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.github.javafaker.Faker;
 import com.manh.ecom_be.components.LocalizationUtils;
@@ -18,6 +20,8 @@ import com.manh.ecom_be.services.product.InterfaceProductService;
 import com.manh.ecom_be.utils.MessageKeys;
 import com.manh.ecom_be.utils.FileUtils;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +53,7 @@ public class ProductController {
     private final InterfaceProductRedisService productRedisService;
     private final ProductRepository productRepository;
     private final SecurityUtils securityUtils;
+    private final com.manh.ecom_be.services.product.image.ProductImageUploadService imageUploads;
 
     @PostMapping("")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
@@ -56,7 +61,7 @@ public class ProductController {
             @Valid @RequestBody ProductDTO productDTO
     ) throws Exception {
         Product newProduct = productService.createProduct(productDTO);
-        return ResponseEntity.ok(ApiResponse.created(newProduct, "Create new product successfully"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(newProduct, "Create new product successfully"));
     }
 
     @PostMapping(value = "/uploads/{id}",
@@ -64,74 +69,15 @@ public class ProductController {
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<ApiResponse<?>> uploadImages(
             @PathVariable("id") Long productId,
-            @ModelAttribute("files") List<MultipartFile> files
+            @RequestParam(value = "files", required = false) List<MultipartFile> files
     ) throws Exception {
-        Product existingProduct = productService.getProductById(productId);
-        files = files == null ? new ArrayList<MultipartFile>() : files;
-        if(files.size() > ProductImage.MAXIMUM_IMAGES_PER_PRODUCT) {
-            return ResponseEntity.badRequest().body(
-                    ApiResponse.error(HttpStatus.BAD_REQUEST,
-                            localizationUtils.getLocalizedMessage(MessageKeys.UPLOAD_IMAGES_MAX_5))
-            );
-        }
-
-        List<ProductImage> productImages = new ArrayList<>();
-        for (MultipartFile file : files) {
-            if (file.getSize() == 0) {
-                continue;
-            }
-
-            if (file.getSize() > 10 * 1024 * 1024) {
-                return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                        .body(ApiResponse.error(HttpStatus.PAYLOAD_TOO_LARGE,
-                                localizationUtils.getLocalizedMessage(MessageKeys.UPLOAD_IMAGES_FILE_LARGE)));
-            }
-
-            String contentType = file.getContentType();
-            if (contentType == null || !contentType.startsWith("image/")) {
-                return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
-                        .body(ApiResponse.error(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-                                localizationUtils.getLocalizedMessage(MessageKeys.UPLOAD_IMAGES_FILE_MUST_BE_IMAGE)));
-            }
-
-            String filename = FileUtils.storeFile(file);
-
-            ProductImage productImage = productService.createProductImage(
-                    existingProduct.getId(),
-                    ProductImageDTO.builder()
-                            .imageUrl(filename)
-                            .build()
-            );
-            productImages.add(productImage);
-        }
-
+        var productImages = imageUploads.upload(productId, files);
         return ResponseEntity.ok(ApiResponse.created(productImages, "Upload images successfully"));
     }
-
     @GetMapping("/images/{imageName}")
     public ResponseEntity<?> viewImage(@PathVariable String imageName) {
-        try {
-            java.nio.file.Path imagePath = Paths.get("uploads/" + imageName);
-            UrlResource resource = new UrlResource(imagePath.toUri());
-
-            if (resource.exists() || resource.isReadable()) {
-                return ResponseEntity.ok()
-                        .contentType(MediaType.IMAGE_JPEG)
-                        .body(resource);
-            } else {
-                log.info("{} not found, serving fallback image", imageName);
-                return ResponseEntity.ok()
-                        .contentType(MediaType.IMAGE_JPEG)
-                .body(new UrlResource(Paths.get("uploads/notfound.jpeg").toUri()));
-
-            }
-
-        } catch (Exception e) {
-            log.error("Error occurred while retrieving image: {}", e.getMessage());
-            return ResponseEntity.notFound().build();
-        }
+        return FileUtils.imageResponse(imageName);
     }
-
     @GetMapping("")
     public ResponseEntity<ApiResponse<ProductListResponse>> getProducts(
             @RequestParam(defaultValue = "") String keyword,
@@ -139,43 +85,20 @@ public class ProductController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int limit
     ) throws JsonProcessingException {
-        int totalPages = 0;
-
-        PageRequest pageRequest = PageRequest.of(
-                page, limit,
-                Sort.by("id").ascending()
-        );
-        log.info("keyword = {}, category_id = {}, page = {}, limit = {}", keyword, categoryId, page, limit);
-        List<ProductResponse> productResponses = productRedisService
-                .getAllProducts(keyword, categoryId, pageRequest);
-
-        if (productResponses!=null && !productResponses.isEmpty()) {
-            totalPages = productResponses.get(0).getTotalPages();
+        if (page < 0 || page > 100000 || limit < 1 || limit > 100
+                || categoryId < 0 || keyword.length() > 200) {
+            throw new com.manh.ecom_be.exceptions.InvalidParamException("Invalid page, limit, category or keyword");
         }
-        if(productResponses == null) {
-            Page<ProductResponse> productPage = productService
-                    .getAllProducts(keyword, categoryId, pageRequest);
-
-            totalPages = productPage.getTotalPages();
-            productResponses = productPage.getContent();
-
-            for (ProductResponse product : productResponses) {
-                product.setTotalPages(totalPages);
-            }
-
-            productRedisService.saveAllProducts(
-                    productResponses,
-                    keyword,
-                    categoryId,
-                    pageRequest
-            );
+        PageRequest pageRequest = PageRequest.of(page, limit, Sort.by("id").ascending());
+        ProductListResponse productListResponse = productRedisService.getAllProducts(keyword, categoryId, pageRequest);
+        if (productListResponse == null) {
+            Page<ProductResponse> productPage = productService.getAllProducts(keyword, categoryId, pageRequest);
+            var products = productPage.getContent();
+            products.forEach(product -> product.setTotalPages(productPage.getTotalPages()));
+            productListResponse = ProductListResponse.builder().products(products)
+                    .totalPages(productPage.getTotalPages()).build();
+            productRedisService.saveAllProducts(productListResponse, keyword, categoryId, pageRequest);
         }
-
-        ProductListResponse productListResponse = ProductListResponse
-                .builder()
-                .products(productResponses)
-                .totalPages(totalPages)
-                .build();
         return ResponseEntity.ok(ApiResponse.success(productListResponse, "Get products successfully"));
     }
 
@@ -203,7 +126,7 @@ public class ProductController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     @Operation(security = {@SecurityRequirement(name = "bearer-key")})
-    public ResponseEntity<ApiResponse<?>> deleteProduct(@PathVariable long id) {
+    public ResponseEntity<ApiResponse<?>> deleteProduct(@PathVariable long id) throws com.manh.ecom_be.exceptions.DataNotFoundException {
         productService.deleteProduct(id);
         return ResponseEntity.ok(ApiResponse.success(null,
                 String.format("Product with id = %d deleted successfully", id)));
@@ -218,7 +141,7 @@ public class ProductController {
             }
             ProductDTO productDTO = ProductDTO.builder()
                     .name(productName)
-                    .price((float)faker.number().numberBetween(10, 90_000_000))
+                    .price(BigDecimal.valueOf(faker.number().numberBetween(10, 10_000_001)))
                     .description(faker.lorem().sentence())
                     .thumbnail("")
                     .categoryId((long)faker.number().numberBetween(2, 5))
@@ -273,3 +196,4 @@ public class ProductController {
     }
 
 }
+

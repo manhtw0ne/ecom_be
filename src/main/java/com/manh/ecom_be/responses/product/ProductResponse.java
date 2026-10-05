@@ -1,5 +1,7 @@
 package com.manh.ecom_be.responses.product;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.manh.ecom_be.models.Comment;
@@ -26,7 +28,9 @@ import java.util.stream.Collectors;
 public class ProductResponse extends BaseResponse {
     private Long id;
     private String name;
-    private Float price;
+    private BigDecimal price;
+    @JsonProperty("stock_quantity")
+    private int stockQuantity;
     private String thumbnail;
     private String description;
 
@@ -54,6 +58,7 @@ public class ProductResponse extends BaseResponse {
                 .id(product.getId())
                 .name(product.getName())
                 .price(product.getPrice())
+                .stockQuantity(product.getStockQuantity())
                 .thumbnail(product.getThumbnail())
                 .comments(comments.stream().map(CommentResponse::fromComment).toList()) // Collect sorted comments into a list
                 .favorites(favorites.stream().map(FavoriteResponse::fromFavorite).toList())

@@ -1,74 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-
-    <!-- ─────────────── Properties ─────────────── -->
     <property name="LOG_DIR" value="logs"/>
-    <property name="APP_NAME" value="ecom-be"/>
-
-    <!-- Console pattern with MDC fields and colors -->
-    <property name="CONSOLE_PATTERN"
-              value="%d{HH:mm:ss.SSS} %highlight(%-5level) [%blue(%X{requestId:-NO_REQ})] %cyan(%logger{20}) - %msg%n"/>
-
-    <!-- File pattern with all MDC fields (no colors) -->
-    <property name="FILE_PATTERN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [requestId=%X{requestId:-}] [userId=%X{userId:-anonymous}] [%X{method:-} %X{uri:-}] %logger{36} - %msg%n"/>
-
-    <!-- ─────────────── Console Appender ─────────────── -->
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>${CONSOLE_PATTERN}</pattern>
-            <charset>UTF-8</charset>
-        </encoder>
-    </appender>
-
-    <!-- ─────────────── Rolling File Appender ─────────────── -->
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_DIR}/${APP_NAME}.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <!-- Daily rollover + max 10MB per file -->
-            <fileNamePattern>${LOG_DIR}/archived/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
-            <maxFileSize>10MB</maxFileSize>
-            <maxHistory>30</maxHistory>
-            <totalSizeCap>500MB</totalSizeCap>
-        </rollingPolicy>
-        <encoder>
-            <pattern>${FILE_PATTERN}</pattern>
-            <charset>UTF-8</charset>
-        </encoder>
-    </appender>
-
-    <!-- ─────────────── Profile: dev ─────────────── -->
-    <springProfile name="dev">
-        <root level="INFO">
-            <appender-ref ref="CONSOLE"/>
-        </root>
-        <!-- Show SQL in dev -->
-        <logger name="org.hibernate.SQL" level="DEBUG"/>
+    <springProfile name="!prod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder><pattern>%d{HH:mm:ss.SSS} %-5level [%X{requestId:-NO_REQ}] %logger{30} - %msg%n</pattern></encoder>
+        </appender>
+        <root level="INFO"><appender-ref ref="CONSOLE"/></root>
     </springProfile>
-
-    <!-- ─────────────── Profile: prod ─────────────── -->
     <springProfile name="prod">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+        </appender>
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_DIR}/ecom-be.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_DIR}/archived/ecom-be.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>10MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>500MB</totalSizeCap>
+            </rollingPolicy>
+            <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+        </appender>
         <root level="INFO">
-            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="JSON_CONSOLE"/>
             <appender-ref ref="FILE"/>
         </root>
-        <!-- Less verbose in prod -->
-        <logger name="org.hibernate" level="WARN"/>
-        <logger name="org.springframework" level="WARN"/>
     </springProfile>
-
-    <!-- ─────────────── Default (no profile) ─────────────── -->
-    <springProfile name="default">
-        <root level="INFO">
-            <appender-ref ref="CONSOLE"/>
-            <appender-ref ref="FILE"/>
-        </root>
-    </springProfile>
-
-    <!-- ─────────────── App-level Loggers ─────────────── -->
-    <logger name="com.manh.ecom_be" level="DEBUG" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-    </logger>
-
 </configuration>

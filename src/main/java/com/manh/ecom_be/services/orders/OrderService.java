@@ -1,22 +1,34 @@
 package com.manh.ecom_be.services.orders;
 
+import java.math.BigDecimal;
+
 
 import com.manh.ecom_be.dtos.CartItemDTO;
 import com.manh.ecom_be.dtos.OrderDTO;
-import com.manh.ecom_be.dtos.OrderDetailDTO;
-import com.manh.ecom_be.dtos.OrderWithDetailsDTO;
+
+
 import com.manh.ecom_be.exceptions.DataNotFoundException;
 import com.manh.ecom_be.models.*;
 import com.manh.ecom_be.repositories.CouponRepository;
-import com.manh.ecom_be.repositories.OrderDetailRepository;
+
 import com.manh.ecom_be.repositories.OrderRepository;
 import com.manh.ecom_be.repositories.ProductRepository;
 import com.manh.ecom_be.repositories.UserRepository;
 import com.manh.ecom_be.responses.order.OrderResponse;
 import com.manh.ecom_be.components.metrics.BusinessMetrics;
+import com.manh.ecom_be.components.TransactionCallbacks;
+import com.manh.ecom_be.exceptions.OutOfStockException;
+import com.manh.ecom_be.services.email.OrderPlaced;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -27,22 +39,43 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+import java.util.concurrent.TimeUnit;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OrderService implements InterfaceOrderService {
+    private final com.manh.ecom_be.components.OrderAccess orderAccess;
     private final UserRepository userRepository;
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final CouponRepository couponRepository;
-    private final OrderDetailRepository orderDetailRepository;
+
 
     private final ModelMapper modelMapper;
     private final BusinessMetrics businessMetrics;
+    private final ApplicationEventPublisher eventPublisher;
+    private final com.manh.ecom_be.services.coupon.InterfaceCouponService couponService;
+    private final com.manh.ecom_be.services.product.InterfaceProductRedisService productRedisService;
+
+    /**
+     * Optional Redisson client for distributed locking.
+     * If Redis/Redisson is disabled (e.g., test environment), this is null
+     * and stock deduction falls back to database-level transaction isolation.
+     */
+    @Autowired(required = false)
+    private RedissonClient redissonClient;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Order createOrder(OrderDTO orderDTO) throws Exception {
+        orderAccess.requireOwnerOrAdmin(orderDTO.getUserId());
+        if ((orderDTO.getPaymentMethod() != null && !orderDTO.getPaymentMethod().isBlank()
+                && !"cod".equalsIgnoreCase(orderDTO.getPaymentMethod()))
+                || (orderDTO.getVnpTxnRef() != null && !orderDTO.getVnpTxnRef().isBlank())) {
+            throw new com.manh.ecom_be.exceptions.InvalidParamException("Only COD checkout is supported");
+        }
+        orderDTO.setPaymentMethod("cod");
         User user = userRepository
                 .findById(orderDTO.getUserId())
                 .orElseThrow(() -> new DataNotFoundException("User not found: " + orderDTO.getUserId()));
@@ -63,7 +96,7 @@ public class OrderService implements InterfaceOrderService {
         order.setShippingDate(shippingDate);
         order.setActive(true);
 
-        order.setTotalMoney(orderDTO.getTotalMoney());
+        order.setTotalMoney(BigDecimal.ZERO);
 
         if (orderDTO.getVnpTxnRef() != null) {
             order.setVnpTxnRef(orderDTO.getVnpTxnRef());
@@ -73,74 +106,125 @@ public class OrderService implements InterfaceOrderService {
             order.setShippingAddress(orderDTO.getAddress());
         }
 
+        if (orderDTO.getCartItems() == null || orderDTO.getCartItems().isEmpty()) {
+            throw new IllegalArgumentException("Cart must not be empty");
+        }
+        // Aggregate duplicates and lock in a stable order to avoid cross-cart deadlocks.
+        java.util.Map<Long, Integer> quantities = new java.util.TreeMap<>();
+        for (CartItemDTO item : orderDTO.getCartItems()) {
+            if (item == null || item.getProductId() == null || item.getQuantity() == null
+                    || item.getQuantity() <= 0) {
+                throw new IllegalArgumentException("Product and positive quantity are required");
+            }
+            try {
+                quantities.merge(item.getProductId(), item.getQuantity(), Math::addExact);
+            } catch (ArithmeticException ex) {
+                throw new IllegalArgumentException("Combined product quantity is too large", ex);
+            }
+        }
         List<OrderDetail> orderDetails = new ArrayList<>();
-        for (CartItemDTO cartItemDTO : orderDTO.getCartItems()) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (var item : quantities.entrySet()) {
             OrderDetail orderDetail = new OrderDetail();
             orderDetail.setOrder(order);
 
-            Long productId = cartItemDTO.getProductId();
-            int quantity = cartItemDTO.getQuantity();
+            Long productId = item.getKey();
+            int quantity = item.getValue();
 
-            Product product = productRepository.findById(productId)
-                    .orElseThrow(() -> new DataNotFoundException("Product not found with id: " + productId));
-
-            orderDetail.setProduct(product);
-            orderDetail.setNumberOfProducts(quantity);
-            orderDetail.setPrice(product.getPrice());
-            orderDetails.add(orderDetail);
+            // Watchdog renewal avoids a fixed lease expiring during a slow transaction.
+            // A database row lock also protects writes if a Redis lock is ever lost.
+            RLock lock = (redissonClient != null)
+                    ? redissonClient.getLock("order:stock:" + productId)
+                    : null;
+            if (lock != null) {
+                try {
+                    if (!lock.tryLock(5, TimeUnit.SECONDS)) {
+                        throw new IllegalArgumentException("Product is busy; retry the order");
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw ex;
+                }
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override public void afterCompletion(int status) {
+                            if (lock.isHeldByCurrentThread()) lock.unlock();
+                        }
+                    });
+                }
+            }
+            try {
+                Product product = productRepository.findByIdForUpdate(productId)
+                        .orElseThrow(() -> new DataNotFoundException("Product not found with id: " + productId));
+                if (product.getStockQuantity() < quantity) throw new OutOfStockException(productId);
+                product.setStockQuantity(product.getStockQuantity() - quantity);
+                orderDetail.setProduct(product);
+                orderDetail.setProductNameSnapshot(product.getName());
+                orderDetail.setProductThumbnailSnapshot(product.getThumbnail());
+                orderDetail.setNumberOfProducts(quantity);
+                orderDetail.setPrice(product.getPrice());
+                BigDecimal lineTotal = com.manh.ecom_be.utils.Money.amount(product.getPrice())
+                        .multiply(BigDecimal.valueOf(quantity));
+                orderDetail.setTotalMoney(com.manh.ecom_be.utils.Money.amount(lineTotal));
+                total = total.add(lineTotal);
+                orderDetails.add(orderDetail);
+            } finally {
+                if (lock != null && !TransactionSynchronizationManager.isSynchronizationActive()
+                        && lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
+            }
         }
 
         String couponCode = orderDTO.getCouponCode();
-        if (!couponCode.isEmpty()) {
+        if (couponCode != null && !couponCode.isBlank()) {
             Coupon coupon = couponRepository.findByCode(couponCode)
                     .orElseThrow(() -> new IllegalArgumentException("Coupon not found"));
             if (!coupon.isActive()) {
                 throw new IllegalArgumentException("Coupon is not active");
             }
             order.setCoupon(coupon);
+            total = couponService.calculateCouponValue(couponCode, total);
         } else {
             order.setCoupon(null);
         }
 
-        orderDetailRepository.saveAll(orderDetails);
+        order.setTotalMoney(com.manh.ecom_be.utils.Money.amount(total));
+        order.setOrderDetails(orderDetails);
         orderRepository.save(order);
-        businessMetrics.incrementOrdersCreated();
+        eventPublisher.publishEvent(new OrderPlaced(order.getEmail(), order.getId(), order.getTotalMoney()));
+        TransactionCallbacks.afterCommit(businessMetrics::incrementOrdersCreated);
         log.info("Order created successfully: orderId={}, userId={}", order.getId(), order.getUser().getId());
         return order;
     }
 
-    @Transactional
-    public Order updateOrderWithDetails(OrderWithDetailsDTO orderWithDetailsDTO) {
-        modelMapper.typeMap(OrderWithDetailsDTO.class, Order.class)
-                .addMappings(mapper -> mapper.skip(Order::setId));
-        Order order = new Order();
-        modelMapper.map(orderWithDetailsDTO, order);
-        Order savedOrder = orderRepository.save(order);
-
-        for (OrderDetailDTO orderDetailDTO : orderWithDetailsDTO.getOrderDetailDTOS()) {
-
-        }
-
-        List<OrderDetail> savedOrderDetails = orderDetailRepository.saveAll(order.getOrderDetails());
-        savedOrder.setOrderDetails(savedOrderDetails);
-        return savedOrder;
-    }
-
-
-
     @Override
-    public Order getOrderById(Long orderId) {
-        Order order = orderRepository.findById(orderId).orElse(null);
-        if (order == null) {
-            order = orderRepository.findByVnpTxnRef(orderId.toString()).orElse(null);
-        }
+    public Order getOrderById(Long orderId) throws DataNotFoundException {
+        orderAccess.requireUser();
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new DataNotFoundException("Order not found: " + orderId));
+        orderAccess.requireOrder(order);
         return order;
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
+    public Order cancelOrder(Long id) throws DataNotFoundException {
+        orderAccess.requireUser();
+        Order order = orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new DataNotFoundException("Order not found: " + id));
+        // Check ownership while holding the same lock used for the transition.
+        orderAccess.requireOrder(order);
+        applyStatus(order, OrderStatus.CANCELLED);
+        return orderRepository.save(order);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public Order updateOrder(Long id, OrderDTO orderDTO) throws DataNotFoundException {
-        Order order = getOrderById(id);
+        orderAccess.requireAdmin();
+        Order order = orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new DataNotFoundException("Order not found: " + id));
         User existingUser = userRepository.findById(
                 orderDTO.getUserId()).orElseThrow(() ->
                 new DataNotFoundException("Cannot find user with id: " + id));
@@ -164,7 +248,7 @@ public class OrderService implements InterfaceOrderService {
         }
 
         if (orderDTO.getStatus() != null && !orderDTO.getStatus().trim().isEmpty()) {
-            order.setStatus(orderDTO.getStatus().trim());
+            applyStatus(order, orderDTO.getStatus().trim());
         }
 
         if (orderDTO.getAddress() != null && !orderDTO.getAddress().trim().isEmpty()) {
@@ -173,10 +257,6 @@ public class OrderService implements InterfaceOrderService {
 
         if (orderDTO.getNote() != null && !orderDTO.getNote().trim().isEmpty()) {
             order.setNote(orderDTO.getNote().trim());
-        }
-
-        if (orderDTO.getTotalMoney() != null) {
-            order.setTotalMoney(orderDTO.getTotalMoney());
         }
 
         if (orderDTO.getShippingMethod() != null && !orderDTO.getShippingMethod().trim().isEmpty()) {
@@ -202,7 +282,8 @@ public class OrderService implements InterfaceOrderService {
     @Override
     @Transactional
     public void deleteOrder(Long orderId) {
-        Order order = getOrderById(orderId);
+        orderAccess.requireAdmin();
+        Order order = orderRepository.findById(orderId).orElse(null);
 
         if (order != null) {
             order.setActive(false);
@@ -212,19 +293,28 @@ public class OrderService implements InterfaceOrderService {
 
     @Override
     public List<OrderResponse> findByUserId(Long userId) {
+        orderAccess.requireOwnerOrAdmin(userId);
         List<Order> orders = orderRepository.findByUserId(userId);
         return orders.stream().map(order -> OrderResponse.fromOrder(order)).toList();
     }
 
     @Override
     public Page<Order> getOrdersByKeyword(String keyword, Pageable pageable) {
+        orderAccess.requireAdmin();
         return orderRepository.findByKeyword(keyword, pageable);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Order updateOrderStatus(Long id, String status) throws DataNotFoundException, IllegalArgumentException {
-        Order order = getOrderById(id);
+        orderAccess.requireAdmin();
+        Order order = orderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new DataNotFoundException("Order not found: " + id));
+        applyStatus(order, status);
+        return orderRepository.save(order);
+    }
+
+    private void applyStatus(Order order, String status) throws DataNotFoundException {
         if (status == null || status.trim().isEmpty()) {
             throw new IllegalArgumentException("Status cannot be null or empty");
         }
@@ -234,26 +324,28 @@ public class OrderService implements InterfaceOrderService {
         }
 
         String currentStatus = order.getStatus();
-        if (currentStatus.equals(OrderStatus.DELIVERED) && !status.equals(OrderStatus.CANCELLED)) {
-            throw new IllegalArgumentException("Cannot change status of a DELIVERED order");
-        }
-
-        if (status.equals(OrderStatus.CANCELLED)) {
-            throw new IllegalArgumentException("Cannot change status of a CANCELLED order");
-        }
-
-        if (status.equals(OrderStatus.CANCELLED)) {
-            if (!currentStatus.equals(OrderStatus.PENDING)) {
-                throw new IllegalArgumentException("Cannot change status of a PENDING order");
+        if (status.equals(currentStatus)) return;
+        boolean allowed = switch (currentStatus) {
+            case OrderStatus.PENDING -> status.equals(OrderStatus.PROCESSING) || status.equals(OrderStatus.CANCELLED);
+            case OrderStatus.PROCESSING -> status.equals(OrderStatus.SHIPPED) || status.equals(OrderStatus.CANCELLED);
+            case OrderStatus.SHIPPED -> status.equals(OrderStatus.DELIVERED);
+            default -> false;
+        };
+        if (!allowed) throw new IllegalArgumentException("Invalid order transition: " + currentStatus + " -> " + status);
+        if (OrderStatus.CANCELLED.equals(status)) {
+            // The order row lock makes repeated/concurrent cancellation idempotent.
+            for (OrderDetail detail : order.getOrderDetails().stream()
+                    .sorted(java.util.Comparator.comparing(d -> d.getProduct().getId())).toList()) {
+                if (productRepository.restoreStock(detail.getProduct().getId(), detail.getNumberOfProducts()) != 1) {
+                    throw new DataNotFoundException("Product no longer exists");
+                }
             }
+            productRedisService.clear();
         }
-
         order.setStatus(status);
         if (OrderStatus.CANCELLED.equals(status)) {
-            businessMetrics.incrementOrdersCancelled();
+            TransactionCallbacks.afterCommit(businessMetrics::incrementOrdersCancelled);
             log.info("Order cancelled: orderId={}", order.getId());
         }
-
-        return orderRepository.save(order);
     }
 }

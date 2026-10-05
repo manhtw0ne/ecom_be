@@ -44,6 +44,9 @@ public enum ErrorCode {
 
     // ─────────────── Data (6xxx) ───────────────
     DATA_INTEGRITY_VIOLATION(6001, "Data integrity violation: duplicate or invalid data", HttpStatus.CONFLICT),
+
+    // ─────────────── Rate Limiting (7xxx) ───────────────
+    TOO_MANY_REQUESTS(7001, "Too many requests. Please slow down.", HttpStatus.TOO_MANY_REQUESTS),
     ;
 
     private final int code;

@@ -15,5 +15,5 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 public class CouponCalculationResponse {
     @JsonProperty("result")
-    private Double result;
+    private BigDecimal result;
 }

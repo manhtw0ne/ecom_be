@@ -26,7 +26,7 @@ import static org.springframework.http.HttpMethod.*;
 
 @Configuration
 @EnableMethodSecurity
-@EnableWebSecurity(debug = true)
+@EnableWebSecurity
 @RequiredArgsConstructor
 public class WebSecurityConfig {
     private final JwtTokenFilter jwtTokenFilter;
@@ -35,9 +35,13 @@ public class WebSecurityConfig {
     @Value("${api.prefix}")
     private String apiPrefix;
 
+    @Value("${management.endpoints.web.base-path:/actuator}")
+    private String managementBasePath;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(
                         c -> c.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -46,13 +50,17 @@ public class WebSecurityConfig {
                 .exceptionHandling(customizer -> customizer
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(requests -> requests
+                        .requestMatchers(GET, managementBasePath + "/health",
+                                managementBasePath + "/health/liveness",
+                                managementBasePath + "/health/readiness").permitAll()
+                        .requestMatchers(org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest.toAnyEndpoint())
+                                .hasRole("ADMIN")
+                        .requestMatchers(managementBasePath, managementBasePath + "/**").hasRole("ADMIN")
+                        .requestMatchers(apiPrefix + "/healthcheck/**").hasRole("ADMIN")
+                        .requestMatchers(POST, apiPrefix + "/users/refreshToken").permitAll()
                         .requestMatchers(
                                 String.format("%s/users/register", apiPrefix),
                                 String.format("%s/users/login", apiPrefix),
-                                // Healthcheck
-                                String.format("%s/healthcheck/**", apiPrefix),
-                                // Actuator
-                                String.format("%s/actuator/**", apiPrefix),
                                 // Swagger
                                 "/api-docs",
                                 "/api-docs/**",
@@ -80,15 +88,14 @@ public class WebSecurityConfig {
                                 .requestMatchers(GET,
                                         String.format("%s/products/images/*", apiPrefix)).permitAll()
                                 .requestMatchers(GET,
-                                        String.format("%s/orders/**", apiPrefix)).permitAll()
-                                .requestMatchers(GET,
                                         String.format("%s/users/profile-images/**", apiPrefix)).permitAll()
-                                .requestMatchers(GET,
-                                        String.format("%s/order_details/**", apiPrefix)).permitAll()
                                 .anyRequest().authenticated()
                         )
                 .oauth2Login(Customizer.withDefaults())
-                .oauth2ResourceServer(c -> c.opaqueToken(Customizer.withDefaults()));
+                .oauth2ResourceServer(c -> c.bearerTokenResolver(request ->
+                        org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
+                                ? null : new org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver().resolve(request))
+                        .opaqueToken(Customizer.withDefaults()));
         return http.build();
     }
 }

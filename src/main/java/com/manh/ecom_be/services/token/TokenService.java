@@ -29,32 +29,41 @@ public class TokenService implements InterfaceTokenService {
     private int expirationRefreshToken;
 
     private final TokenRepository tokenRepository;
+    private final com.manh.ecom_be.repositories.UserRepository userRepository;
     private final JwtTokenUtils jwtTokenUtils;
 
     @Override
-    @Transactional
-    public Token refreshToken(String refreshToken, User user)
-            throws Exception {
-        Token existingToken = tokenRepository.findByRefreshToken(refreshToken);
-        if (existingToken == null) {
-            throw new DataNotFoundException("Refresh token does not exist");
+    @Transactional(rollbackFor = Exception.class)
+    public Token refreshToken(String refreshToken) throws Exception {
+        if (refreshToken == null || refreshToken.isBlank()) throw invalidRefresh();
+        // All session mutations lock user before token, including block/password changes.
+        Long ownerId = tokenRepository.findOwnerIdByRefreshToken(refreshToken)
+                .orElseThrow(this::invalidRefresh);
+        User owner = userRepository.findByIdForUpdate(ownerId).orElseThrow(this::invalidRefresh);
+        Token existingToken = tokenRepository.findByRefreshTokenForUpdate(refreshToken)
+                .orElseThrow(this::invalidRefresh);
+        LocalDateTime now = LocalDateTime.now();
+        if (!owner.isActive() || owner.isDeleted() || existingToken.isRevoked() || existingToken.isExpired()
+                || existingToken.getUser() == null || !ownerId.equals(existingToken.getUser().getId())
+                || existingToken.getRefreshExpirationDate() == null
+                || !existingToken.getRefreshExpirationDate().isAfter(now)) {
+            throw invalidRefresh();
         }
-        if (existingToken.getRefreshExpirationDate().compareTo(LocalDateTime.now()) < 0){
-            tokenRepository.delete(existingToken);
-            throw new ExpiredTokenException("Refresh token is expired");
-        }
-        String token = jwtTokenUtils.generateToken(user);
-        LocalDateTime expirationDateTime = LocalDateTime.now().plusSeconds(expiration);
-        existingToken.setExpirationDate(expirationDateTime);
-        existingToken.setToken(token);
+        existingToken.setToken(jwtTokenUtils.generateToken(owner));
+        existingToken.setExpirationDate(now.plusSeconds(expiration));
         existingToken.setRefreshToken(UUID.randomUUID().toString());
-        existingToken.setRefreshExpirationDate(LocalDateTime.now().plusSeconds(expirationRefreshToken));
-        return existingToken;
+        // Absolute session lifetime: rotating does not extend the original refresh deadline.
+        return tokenRepository.saveAndFlush(existingToken);
     }
 
+    private org.springframework.security.authentication.BadCredentialsException invalidRefresh() {
+        return new org.springframework.security.authentication.BadCredentialsException("Invalid refresh token");
+    }
     @Override
     @Transactional
     public Token addToken(User user, String token, boolean isMobileDevice) {
+        user = userRepository.findByIdForUpdate(user.getId()).orElseThrow(this::invalidRefresh);
+        if (!user.isActive() || user.isDeleted()) throw invalidRefresh();
         List<Token> userTokens = tokenRepository.findByUser(user);
         int tokenCount = userTokens.size();
 

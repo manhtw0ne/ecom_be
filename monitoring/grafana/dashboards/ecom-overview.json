@@ -45,7 +45,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "ecom_orders_created_total{application=\"ecom-be\"}",
+          "expr": "ecom_orders_total{application=\"ecom-be\"}",
           "legendFormat": "Total Orders",
           "refId": "A"
         }
@@ -210,7 +210,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(ecom_orders_created_total{application=\"ecom-be\"}[5m])",
+          "expr": "rate(ecom_orders_total{application=\"ecom-be\"}[5m])",
           "legendFormat": "orders/sec",
           "refId": "A"
         }

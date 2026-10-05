@@ -1,5 +1,7 @@
 package com.manh.ecom_be.models;
 
+import java.math.BigDecimal;
+
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
@@ -51,13 +53,15 @@ public class Order extends BaseEntity {
     @Column(name = "status")
     private String status;
 
-    @Column(name = "total_money")
-    private Float totalMoney;
+    @Column(name = "total_money", precision = 19, scale = 2)
+    private BigDecimal totalMoney;
 
     @Column(name = "shipping_method")
+    @Builder.Default
     private String shippingMethod = "";
 
     @Column(name = "shipping_address")
+    @Builder.Default
     private String shippingAddress = "";
 
     @Column(name = "shipping_date")
@@ -67,6 +71,7 @@ public class Order extends BaseEntity {
     private String trackingNumber;
 
     @Column(name = "payment_method")
+    @Builder.Default
     private String paymentMethod = "";
 
     @Column(name = "is_active")

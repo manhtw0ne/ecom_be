@@ -27,6 +27,7 @@ class CategoryServiceTest {
 
     @Mock private CategoryRepository categoryRepository;
     @Mock private ProductRepository productRepository;
+    @Mock private com.manh.ecom_be.components.SecurityUtils securityUtils;
 
     @InjectMocks
     private CategoryService categoryService;
@@ -125,7 +126,7 @@ class CategoryServiceTest {
     void deleteCategory_withProducts_shouldThrowException() {
         Product product = Product.builder().id(1L).name("Phone").category(testCategory).build();
         when(categoryRepository.findById(1L)).thenReturn(Optional.of(testCategory));
-        when(productRepository.findByCategory(testCategory)).thenReturn(List.of(product));
+        when(productRepository.countAllByCategoryId(1L)).thenReturn(1L);
 
         assertThatThrownBy(() -> categoryService.deleteCategory(1L))
                 .isInstanceOf(IllegalStateException.class)

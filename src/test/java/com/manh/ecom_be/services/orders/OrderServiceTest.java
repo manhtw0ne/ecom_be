@@ -1,7 +1,10 @@
 package com.manh.ecom_be.services.orders;
 
+import java.math.BigDecimal;
+
 import com.manh.ecom_be.dtos.CartItemDTO;
 import com.manh.ecom_be.dtos.OrderDTO;
+import com.manh.ecom_be.components.metrics.BusinessMetrics;
 import com.manh.ecom_be.exceptions.DataNotFoundException;
 import com.manh.ecom_be.models.*;
 import com.manh.ecom_be.repositories.*;
@@ -30,12 +33,17 @@ import static org.mockito.Mockito.*;
 @DisplayName("OrderService Unit Tests")
 class OrderServiceTest {
 
+    @Mock private com.manh.ecom_be.components.OrderAccess orderAccess;
     @Mock private UserRepository userRepository;
     @Mock private OrderRepository orderRepository;
     @Mock private ProductRepository productRepository;
     @Mock private CouponRepository couponRepository;
     @Mock private OrderDetailRepository orderDetailRepository;
     @Mock private ModelMapper modelMapper;
+    @Mock private BusinessMetrics businessMetrics;
+    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+    @Mock private com.manh.ecom_be.services.coupon.InterfaceCouponService couponService;
+    @Mock private com.manh.ecom_be.services.product.InterfaceProductRedisService productRedisService;
 
     @InjectMocks
     private OrderService orderService;
@@ -56,7 +64,8 @@ class OrderServiceTest {
         testProduct = Product.builder()
                 .id(1L)
                 .name("Test Product")
-                .price(100.0f)
+                .price(new BigDecimal("100.0"))
+                .stockQuantity(5)
                 .comments(new ArrayList<>())
                 .favorites(new ArrayList<>())
                 .productImages(new ArrayList<>())
@@ -69,7 +78,7 @@ class OrderServiceTest {
                 .phoneNumber("0123456789")
                 .status(OrderStatus.PENDING)
                 .active(true)
-                .totalMoney(100.0f)
+                .totalMoney(new BigDecimal("100.0"))
                 .orderDetails(new ArrayList<>())
                 .build();
 
@@ -78,7 +87,7 @@ class OrderServiceTest {
                 .fullName("Test User")
                 .phoneNumber("0123456789")
                 .address("123 Test St")
-                .totalMoney(100.0f)
+                .totalMoney(new BigDecimal("100.0"))
                 .shippingMethod("express")
                 .shippingAddress("123 Test St")
                 .shippingDate(LocalDate.now().plusDays(1))
@@ -105,8 +114,7 @@ class OrderServiceTest {
             doNothing().when(modelMapper).map(any(OrderDTO.class), any(Order.class));
 
             when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
-            when(productRepository.findById(1L)).thenReturn(Optional.of(testProduct));
-            when(orderDetailRepository.saveAll(anyList())).thenReturn(new ArrayList<>());
+            when(productRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testProduct));
             when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
                 Order saved = invocation.getArgument(0);
                 saved.setId(1L);
@@ -120,7 +128,10 @@ class OrderServiceTest {
             assertThat(result.getStatus()).isEqualTo(OrderStatus.PENDING);
             assertThat(result.getActive()).isTrue();
             verify(orderRepository).save(any(Order.class));
-            verify(orderDetailRepository).saveAll(anyList());
+            assertThat(testProduct.getStockQuantity()).isEqualTo(3);
+            assertThat(result.getTotalMoney()).isEqualByComparingTo("200");
+            assertThat(result.getOrderDetails()).hasSize(1);
+            assertThat(result.getOrderDetails().getFirst().getTotalMoney()).isEqualByComparingTo("200");
         }
 
         @Test
@@ -155,7 +166,7 @@ class OrderServiceTest {
 
     @Test
     @DisplayName("getOrderById should return order when it exists")
-    void getOrderById_existingId_shouldReturnOrder() {
+    void getOrderById_existingId_shouldReturnOrder() throws Exception {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(testOrder));
 
         Order result = orderService.getOrderById(1L);
@@ -177,7 +188,7 @@ class OrderServiceTest {
                 .status(OrderStatus.PROCESSING)
                 .build();
 
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(testOrder));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testOrder));
         when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -214,7 +225,7 @@ class OrderServiceTest {
         void updateOrderStatus_validTransition_shouldUpdate() throws Exception {
             testOrder.setStatus(OrderStatus.PENDING);
 
-            when(orderRepository.findById(1L)).thenReturn(Optional.of(testOrder));
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testOrder));
             when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             Order result = orderService.updateOrderStatus(1L, OrderStatus.PROCESSING);
@@ -226,7 +237,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("should throw exception for invalid status value")
         void updateOrderStatus_invalidStatus_shouldThrowException() {
-            when(orderRepository.findById(1L)).thenReturn(Optional.of(testOrder));
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testOrder));
 
             assertThatThrownBy(() -> orderService.updateOrderStatus(1L, "invalid_status"))
                     .isInstanceOf(IllegalArgumentException.class)

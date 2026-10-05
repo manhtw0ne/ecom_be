@@ -1,5 +1,7 @@
 package com.manh.ecom_be.responses.order;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.manh.ecom_be.models.Order;
@@ -48,7 +50,7 @@ public class OrderResponse {
     private String status;
 
     @JsonProperty("total_money")
-    private double totalMoney;
+    private BigDecimal totalMoney;
 
     @JsonProperty("shipping_method")
     private String shippingMethod;

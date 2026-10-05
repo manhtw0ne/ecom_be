@@ -2,16 +2,19 @@ package com.manh.ecom_be.controllers;
 
 
 import com.manh.ecom_be.components.LocalizationUtils;
-import com.manh.ecom_be.components.SecurityUtils;
+import com.manh.ecom_be.components.OrderAccess;
+import com.manh.ecom_be.exceptions.DataNotFoundException;
 import com.manh.ecom_be.dtos.OrderDTO;
 import com.manh.ecom_be.models.Order;
-import com.manh.ecom_be.models.OrderStatus;
+
 import com.manh.ecom_be.models.User;
 import com.manh.ecom_be.responses.ApiResponse;
 import com.manh.ecom_be.responses.order.OrderResponse;
 import com.manh.ecom_be.responses.order.OrderListResponse;
 import com.manh.ecom_be.services.orders.InterfaceOrderService;
 import com.manh.ecom_be.utils.MessageKeys;
+
+
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -30,33 +33,31 @@ import java.util.List;
 public class OrderController {
     private final InterfaceOrderService orderService;
     private final LocalizationUtils localizationUtils;
-    private final SecurityUtils securityUtils;
+    private final OrderAccess orderAccess;
 
     @PostMapping("")
     @PreAuthorize("hasRole('ROLE_USER') or hasRole('ROLE_ADMIN')")
     public ResponseEntity<ApiResponse<Order>> createOrder(
             @Valid @RequestBody OrderDTO orderDTO
     ) throws Exception {
-        User loginUser = securityUtils.getLoggedInUser();
-        if (orderDTO.getUserId() == null) {
-            orderDTO.setUserId(loginUser.getId());
-        }
+        User loginUser = orderAccess.requireUser();
+        orderDTO.setUserId(loginUser.getId());
         Order orderResponse = orderService.createOrder(orderDTO);
-        return ResponseEntity.ok(ApiResponse.created(orderResponse, "Insert order successfully"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(orderResponse, "Insert order successfully"));
     }
 
     @GetMapping("/user/{user_id}")
     public ResponseEntity<ApiResponse<List<OrderResponse>>> getOrders(
             @Valid @PathVariable("user_id") Long userId
     ) {
-        User loginUser = securityUtils.getLoggedInUser();
+        User loginUser = orderAccess.requireUser();
         boolean isUserIdBlank = userId == null || userId == 0;
         List<OrderResponse> orderResponses = orderService.findByUserId(isUserIdBlank ? loginUser.getId() : userId);
         return ResponseEntity.ok(ApiResponse.success(orderResponses, "Get list of orders successfully"));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable Long orderId) {
+    public ResponseEntity<ApiResponse<OrderResponse>> getOrder(@PathVariable("id") Long orderId) throws DataNotFoundException {
         Order existingOrder = orderService.getOrderById(orderId);
         OrderResponse orderResponse = OrderResponse.fromOrder(existingOrder);
         return ResponseEntity.ok(ApiResponse.success(orderResponse, "Get order successfully"));
@@ -77,26 +78,7 @@ public class OrderController {
     public ResponseEntity<ApiResponse<?>> cancelOrder(
             @Valid @PathVariable long id
     ) throws Exception {
-        Order order = orderService.getOrderById(id);
-        User loginUser = securityUtils.getLoggedInUser();
-        if (loginUser.getId() != order.getUser().getId()) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
-                    ApiResponse.error(HttpStatus.FORBIDDEN, "You do not have permission to cancel this order"));
-        }
-        if (order.getStatus().equals(OrderStatus.DELIVERED) ||
-        order.getStatus().equals(OrderStatus.SHIPPED) ||
-        order.getStatus().equals(OrderStatus.CANCELLED)) {
-            String message = "You cannot cancel an order with status: " + order.getStatus();
-            return ResponseEntity.badRequest().body(
-                    ApiResponse.error(HttpStatus.BAD_REQUEST, message));
-        }
-
-        OrderDTO orderDTO = OrderDTO.builder()
-                .userId(order.getUser().getId())
-                .status(OrderStatus.CANCELLED)
-                .build();
-
-        order = orderService.updateOrder(id, orderDTO);
+        Order order = orderService.cancelOrder(id);
         return ResponseEntity.ok(ApiResponse.success(order, "Cancel order successfully"));
     }
 
@@ -110,11 +92,15 @@ public class OrderController {
     }
 
     @GetMapping("/get-orders-by-keyword")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<ApiResponse<OrderListResponse>> getOrdersByKeyword(
             @RequestParam(defaultValue = "", required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int limit
     ) {
+        if (page < 0 || page > 100000 || limit < 1 || limit > 100 || keyword.length() > 200) {
+            throw new com.manh.ecom_be.exceptions.InvalidParamException("Invalid page, limit or keyword");
+        }
         PageRequest pageRequest = PageRequest.of(
                 page, limit,
                 Sort.by("id").ascending()
@@ -133,7 +119,7 @@ public class OrderController {
     }
 
     @PutMapping("/{id}/status")
-    @PreAuthorize("hasRole('ROLE_ADMIN') or hasRole('ROLE_USER')")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
     public ResponseEntity<ApiResponse<OrderResponse>> updateOrderStatus(
             @Valid @PathVariable Long id,
             @RequestParam String status) throws Exception {
@@ -142,3 +128,4 @@ public class OrderController {
                 OrderResponse.fromOrder(updatedOrder), "Update order status successfully"));
     }
 }
+

@@ -10,7 +10,7 @@ import java.util.List;
 public interface InterfaceCommentService {
     Comment insertComment(CommentDTO comment);
 
-    void deleteComment(Long commentId);
+    void deleteComment(Long commentId) throws DataNotFoundException;
     void updateComment(Long id, CommentDTO commentDTO) throws DataNotFoundException;
 
     List<CommentResponse> getCommentsByUserAndProduct(Long userId, Long productId);

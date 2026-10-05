@@ -1,5 +1,7 @@
 package com.manh.ecom_be.dtos;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Min;
 import lombok.*;
@@ -21,7 +23,7 @@ public class OrderDetailDTO {
     private Long productId;
 
     @Min(value = 0, message = "Product's ID must be >= 0")
-    private Float price;
+    private BigDecimal price;
 
     @Min(value = 1, message = "number_of_products must be >= 1")
     @JsonProperty("number_of_products")
@@ -29,7 +31,7 @@ public class OrderDetailDTO {
 
     @Min(value = 0, message = "total_money must be >= 0")
     @JsonProperty("total_money")
-    private Float totalMoney;
+    private BigDecimal totalMoney;
 
     private String color;
 }

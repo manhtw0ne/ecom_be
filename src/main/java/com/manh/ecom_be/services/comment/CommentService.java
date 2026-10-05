@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 @Service
 public class CommentService implements InterfaceCommentService {
     private static final Logger logger = LoggerFactory.getLogger(CommentService.class);
+    private final com.manh.ecom_be.components.SecurityUtils securityUtils;
     private final CommentRepository commentRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
@@ -35,7 +36,8 @@ public class CommentService implements InterfaceCommentService {
     @Override
     @Transactional
     public Comment insertComment(CommentDTO commentDTO) {
-        User user = userRepository.findById(commentDTO.getUserId()).orElse(null);
+        User actor = securityUtils.requireUser();
+        User user = userRepository.findById(actor.getId()).orElse(null);
         Product product = productRepository.findById(commentDTO.getProductId()).orElse(null);
         if (user == null || product == null) {
             throw new IllegalArgumentException("User or product not found");
@@ -50,7 +52,11 @@ public class CommentService implements InterfaceCommentService {
 
     @Override
     @Transactional
-    public void deleteComment(Long commentId) {
+    public void deleteComment(Long commentId) throws DataNotFoundException {
+        securityUtils.requireUser();
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new DataNotFoundException("Comment not found"));
+        securityUtils.requireOwnerOrAdmin(comment.getUser().getId());
 
         commentRepository.deleteById(commentId);
     }
@@ -58,8 +64,10 @@ public class CommentService implements InterfaceCommentService {
     @Override
     @Transactional
     public void updateComment(Long id, CommentDTO commentDTO) throws DataNotFoundException {
+        securityUtils.requireUser();
         Comment existingComment = commentRepository.findById(id)
                 .orElseThrow(() -> new DataNotFoundException("Comment not found"));
+        securityUtils.requireOwnerOrAdmin(existingComment.getUser().getId());
         existingComment.setContent(commentDTO.getContent());
         commentRepository.save(existingComment);
     }
@@ -84,6 +92,7 @@ public class CommentService implements InterfaceCommentService {
 
     @Override
     public void generateFakeComments() throws Exception {
+        securityUtils.requireAdmin();
 
         Faker faker = new Faker();
         Random random = new Random();

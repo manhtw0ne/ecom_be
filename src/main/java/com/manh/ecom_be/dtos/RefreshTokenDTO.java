@@ -11,6 +11,8 @@ import lombok.*;
 @NoArgsConstructor
 @Builder
 public class RefreshTokenDTO {
+    @com.fasterxml.jackson.annotation.JsonAlias("refresh_token")
+    @jakarta.validation.constraints.Size(max = 255)
     @NotBlank
     private String refreshToken;
 }

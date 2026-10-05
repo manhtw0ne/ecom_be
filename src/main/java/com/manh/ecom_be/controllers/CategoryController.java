@@ -7,6 +7,8 @@ import com.manh.ecom_be.models.Category;
 import com.manh.ecom_be.responses.ApiResponse;
 import com.manh.ecom_be.services.category.CategoryService;
 import com.manh.ecom_be.utils.MessageKeys;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -37,12 +39,14 @@ public class CategoryController {
 
     @GetMapping("")
     public ResponseEntity<ApiResponse<List<Category>>> getAllCategories(
-            @RequestParam("page") int page,
-            @RequestParam("limit") int limit
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "limit", defaultValue = "10") int limit
     ) {
-        List<Category> categories = categoryService.getAllCategories();
-        kafkaTemplate.send("get-all-categories", categories);
-        return ResponseEntity.ok(ApiResponse.success(categories, "Get categories successfully"));
+        var categories = categoryService.getCategories(page, limit);
+        return ResponseEntity.ok()
+                .header("X-Total-Count", Long.toString(categories.getTotalElements()))
+                .header("X-Total-Pages", Integer.toString(categories.getTotalPages()))
+                .body(ApiResponse.success(categories.getContent(), "Get categories successfully"));
     }
 
     @GetMapping("/{id}")
@@ -72,3 +76,4 @@ public class CategoryController {
         return ResponseEntity.ok(ApiResponse.success(null, "Delete category successfully"));
     }
 }
+

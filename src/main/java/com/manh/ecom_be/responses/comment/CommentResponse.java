@@ -4,7 +4,7 @@ package com.manh.ecom_be.responses.comment;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.manh.ecom_be.models.Comment;
 import com.manh.ecom_be.responses.BaseResponse;
-import com.manh.ecom_be.responses.user.UserResponse;
+
 import lombok.*;
 
 @Getter
@@ -20,7 +20,7 @@ public class CommentResponse extends BaseResponse {
     private String content;
 
     @JsonProperty("user")
-    private UserResponse user;
+    private CommentAuthorResponse user;
 
 
     @JsonProperty("product_id")
@@ -28,7 +28,7 @@ public class CommentResponse extends BaseResponse {
 
 
     public static CommentResponse fromComment(Comment comment) {
-        UserResponse userResponse = UserResponse.fromUser(comment.getUser());
+        CommentAuthorResponse userResponse = CommentAuthorResponse.fromUser(comment.getUser());
         CommentResponse result = CommentResponse.builder()
                 .id(comment.getId())
                 .content(comment.getContent())

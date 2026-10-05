@@ -1,5 +1,7 @@
 package com.manh.ecom_be.controllers;
 
+import java.math.BigDecimal;
+
 
 import com.manh.ecom_be.responses.ApiResponse;
 import com.manh.ecom_be.responses.coupon.CouponCalculationResponse;
@@ -20,8 +22,8 @@ public class CouponController {
     @GetMapping("/calculate")
     public ResponseEntity<ApiResponse<CouponCalculationResponse>> calculateCouponValue(
             @RequestParam("couponCode") String couponCode,
-            @RequestParam("totalAmount") double totalAmount) {
-        double finalAmount = couponService.calculateCouponValue(couponCode, totalAmount);
+            @RequestParam("totalAmount") BigDecimal totalAmount) {
+        BigDecimal finalAmount = couponService.calculateCouponValue(couponCode, totalAmount);
         CouponCalculationResponse couponCalculationResponse = CouponCalculationResponse.builder()
                 .result(finalAmount)
                 .build();

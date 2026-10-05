@@ -13,6 +13,16 @@ import java.util.Optional;
 
 
 public interface ProductRepository extends JpaRepository<Product, Long> {
+    @Query(value = "select count(*) from products where category_id = :categoryId", nativeQuery = true)
+    long countAllByCategoryId(@Param("categoryId") Long categoryId);
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("update Product p set p.stockQuantity = p.stockQuantity + :quantity where p.id = :id")
+    int restoreStock(@Param("id") Long id, @Param("quantity") int quantity);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Product p where p.id = :id")
+    Optional<Product> findByIdForUpdate(@Param("id") Long id);
+
     boolean existsByName(String name);
 
 
@@ -20,6 +30,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByCategory(Category category);
 
 
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = "category")
     @Query("SELECT p FROM Product p WHERE " +
             "(:categoryId IS NULL OR :categoryId = 0 OR p.category.id = :categoryId) " +
             "AND (:keyword IS NULL OR :keyword = '' " +

@@ -34,6 +34,7 @@ import static com.manh.ecom_be.utils.ValidationUtils.isValidEmail;
 @Service
 @RequiredArgsConstructor
 public class UserService implements InterfaceUserService {
+    private final com.manh.ecom_be.components.SecurityUtils securityUtils;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final TokenRepository tokenRepository;
@@ -45,11 +46,15 @@ public class UserService implements InterfaceUserService {
     @Override
     @Transactional
     public User createUser(UserDTO userDTO) throws Exception {
-        if (!userDTO.getPhoneNumber().isBlank() && userRepository.existsByPhoneNumber(userDTO.getPhoneNumber())) {
+        if (userDTO.isSocialLogin() || org.springframework.util.StringUtils.hasText(userDTO.getGoogleAccountId())
+                || org.springframework.util.StringUtils.hasText(userDTO.getFacebookAccountId())) {
+            throw new IllegalArgumentException("Use the verified social login flow to link an identity");
+        }
+        if (userDTO.getPhoneNumber() != null && !userDTO.getPhoneNumber().isBlank() && userRepository.existsByPhoneNumber(userDTO.getPhoneNumber())) {
             throw new DataIntegrityViolationException("Phone number already exists");
         }
 
-        if (!userDTO.getEmail().isBlank()
+        if (userDTO.getEmail() != null && !userDTO.getEmail().isBlank()
                 && userRepository.existsByEmail(userDTO.getEmail())) {
             throw new DataIntegrityViolationException("Email already exists");
         }
@@ -58,8 +63,8 @@ public class UserService implements InterfaceUserService {
                 .orElseThrow(() -> new DataNotFoundException(
                         localizationUtils.getLocalizedMessage(MessageKeys.ROLE_DOES_NOT_EXIST)));
 
-        if (role.getName().equalsIgnoreCase(Role.ADMIN)) {
-            throw new PermissionDenyException("Registering admin account is not allowed");
+        if (!role.getName().equalsIgnoreCase(Role.USER)) {
+            throw new PermissionDenyException("Only the USER role can be registered");
         }
 
         User newUser = User.builder()
@@ -69,18 +74,17 @@ public class UserService implements InterfaceUserService {
                 .password(userDTO.getPassword())
                 .address(userDTO.getAddress())
                 .dateOfBirth(userDTO.getDateOfBirth())
-                .facebookAccountId(userDTO.getFacebookAccountId())
-                .googleAccountId(userDTO.getGoogleAccountId())
+
+
                 .active(true)
                 .build();
 
         newUser.setRole(role);
 
-        if (!userDTO.isSocialLogin()) {
-            String password = userDTO.getPassword();
-            String encodedPassword = passwordEncoder.encode(password);
-            newUser.setPassword(encodedPassword);
+        if (!org.springframework.util.StringUtils.hasText(userDTO.getPassword())) {
+            throw new IllegalArgumentException("Password is required");
         }
+        newUser.setPassword(passwordEncoder.encode(userDTO.getPassword()));
         return userRepository.save(newUser);
     }
 
@@ -101,6 +105,11 @@ public class UserService implements InterfaceUserService {
         }
 
         User existingUser = optionalUser.get();
+
+        if (userLoginDTO.getPassword() == null || existingUser.getPassword() == null
+                || !passwordEncoder.matches(userLoginDTO.getPassword(), existingUser.getPassword())) {
+            throw new BadCredentialsException("Invalid credentials");
+        }
 
         if (!existingUser.isActive()) {
             throw new DataNotFoundException(localizationUtils.getLocalizedMessage(MessageKeys.USER_IS_LOCKED));
@@ -167,7 +176,12 @@ public class UserService implements InterfaceUserService {
     @Transactional
     @Override
     public User updateUser(Long userId, UpdateUserDTO updateUserDTO) throws Exception {
-        User existingUser = userRepository.findById(userId)
+        securityUtils.requireSelf(userId);
+        if (org.springframework.util.StringUtils.hasText(updateUserDTO.getGoogleAccountId())
+                || org.springframework.util.StringUtils.hasText(updateUserDTO.getFacebookAccountId())) {
+            throw new IllegalArgumentException("Social identities cannot be edited through profile updates");
+        }
+        User existingUser = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
 
         if (updateUserDTO.getFullname() != null) {
@@ -186,13 +200,7 @@ public class UserService implements InterfaceUserService {
             existingUser.setDateOfBirth(updateUserDTO.getDateOfBirth());
         }
 
-        if (updateUserDTO.isFacebookAccountIdValid()) {
-            existingUser.setFacebookAccountId(updateUserDTO.getFacebookAccountId());
-        }
 
-        if (updateUserDTO.isGoogleAccountIdValid()) {
-            existingUser.setGoogleAccountId(updateUserDTO.getGoogleAccountId());
-        }
 
         if (updateUserDTO.getPassword() != null
                 && !updateUserDTO.getPassword().isEmpty()) {
@@ -202,6 +210,7 @@ public class UserService implements InterfaceUserService {
             String newPassword = updateUserDTO.getPassword();
             String encodedPassword = passwordEncoder.encode(newPassword);
             existingUser.setPassword(encodedPassword);
+            tokenRepository.findByUser(existingUser).forEach(tokenRepository::delete);
         }
         return userRepository.save(existingUser);
     }
@@ -222,14 +231,11 @@ public class UserService implements InterfaceUserService {
         return user.orElseThrow(() -> new Exception("User not found"));
     }
 
-    @Override
-    public User getUserDetailsFromRefreshToken(String refreshToken) throws Exception {
-        Token existingToken = tokenRepository.findByRefreshToken(refreshToken);
-        return getUserDetailsFromToken(existingToken.getToken());
-    }
+
 
     @Override
     public Page<User> findAll(String keyword, Pageable pageable) {
+        securityUtils.requireAdmin();
         return userRepository.findAll(keyword, pageable);
     }
 
@@ -237,7 +243,8 @@ public class UserService implements InterfaceUserService {
     @Transactional
     public void resetPassword(Long userId, String newPassword)
             throws InvalidPasswordException, DataNotFoundException {
-        User existingUser = userRepository.findById(userId)
+        securityUtils.requireAdmin();
+        User existingUser = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
         String encodedPassword = passwordEncoder.encode(newPassword);
         existingUser.setPassword(encodedPassword);
@@ -252,16 +259,19 @@ public class UserService implements InterfaceUserService {
     @Override
     @Transactional
     public void blockOrEnable(Long userId, Boolean active) throws DataNotFoundException {
+        securityUtils.requireAdmin();
 
-        User existingUser = userRepository.findById(userId)
+        User existingUser = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
         existingUser.setActive(active);
+        if (!active) tokenRepository.findByUser(existingUser).forEach(tokenRepository::delete);
         userRepository.save(existingUser);
     }
 
     @Override
     @Transactional
     public void changeProfileImage(Long userId, String imageName) throws Exception {
+        securityUtils.requireSelf(userId);
         User existingUser = userRepository.findById(userId)
                 .orElseThrow(() -> new DataNotFoundException("User not found"));
         existingUser.setProfileImage(imageName);

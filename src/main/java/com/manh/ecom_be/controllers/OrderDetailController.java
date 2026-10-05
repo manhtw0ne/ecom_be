@@ -26,7 +26,7 @@ public class OrderDetailController {
     private final LocalizationUtils localizationUtils;
 
     @PostMapping("")
-    @PreAuthorize("hasRole('ROLE_USER') or hasRole('ROLE_ADMIN')")
+    @PreAuthorize("denyAll()")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> createOrderDetail(
             @Valid @RequestBody OrderDetailDTO orderDetailDTO) throws Exception {
         OrderDetail newOrderDetail = orderDetailService.createOrderDetail(orderDetailDTO);
@@ -45,7 +45,7 @@ public class OrderDetailController {
     @GetMapping("/order/{orderId}")
     public ResponseEntity<ApiResponse<List<OrderDetailResponse>>> getOrderDetails(
             @Valid @PathVariable("orderId") Long orderId
-    ) {
+    ) throws DataNotFoundException {
         List<OrderDetail> details = orderDetailService.findByOrderId(orderId);
         List<OrderDetailResponse> orderDetailResponses = details.stream()
                 .map(OrderDetailResponse::fromOrderDetail)
@@ -55,7 +55,7 @@ public class OrderDetailController {
 
     @PutMapping("/{id}")
     @Operation(security = {@SecurityRequirement(name = "bearer-key")})
-    @PreAuthorize("hasRole('ROLE_ADMIN') or hasRole('ROLE_USER')")
+    @PreAuthorize("denyAll()")
     public ResponseEntity<ApiResponse<OrderDetail>> updateOrderDetail(
             @Valid @PathVariable("id") Long id,
             @RequestBody OrderDetailDTO orderDetailDTO
@@ -66,7 +66,7 @@ public class OrderDetailController {
 
     @DeleteMapping("/{id}")
     @Operation(security = {@SecurityRequirement(name = "bearer-key")})
-    @PreAuthorize("hasRole('ROLE_ADMIN') or hasRole('ROLE_USER')")
+    @PreAuthorize("denyAll()")
     public ResponseEntity<ApiResponse<?>> deleteOrderDetail(
             @Valid @PathVariable("id") Long id) {
         orderDetailService.deleteById(id);

@@ -1,7 +1,7 @@
 spring:
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    url: jdbc:h2:mem:testdb;MODE=MySQL;NON_KEYWORDS=VALUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
     password:
   jpa:
@@ -12,24 +12,23 @@ spring:
   flyway:
     enabled: false
   kafka:
-    bootstrap-servers: localhost:9092
-    consumer:
-      auto-startup: false
     listener:
       auto-startup: false
+    admin:
+      auto-create: false
   data:
     redis:
-      host: localhost
-      port: 6379
-
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
-
-api:
-  prefix: /api/v1
-
+      use-redis-cache: false
+      use-redisson: false
+app:
+  rate-limit:
+    enabled: false
+management:
+  health:
+    redis:
+      enabled: false
 jwt:
-  expiration: 2592000
-  secretKey: "test-secret-key-for-unit-testing-only-32chars"
+  secretKey: dGVzdC1zZWNyZXQta2V5LWZvci10ZXN0cy1vbmx5LTEyMzQ1Njc4OTA=
+logging:
+  level:
+    root: WARN

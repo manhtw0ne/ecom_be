@@ -19,10 +19,10 @@ public class Token {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "token", length = 255)
+    @Column(name = "token", length = 2048)
     private String token;
 
-    @Column(name = "refresh_token", length = 255)
+    @Column(name = "refresh_token", length = 255, unique = true)
     private String refreshToken;
 
     @Column(name = "token_type", length = 50)

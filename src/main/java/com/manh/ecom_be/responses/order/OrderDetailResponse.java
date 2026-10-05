@@ -1,5 +1,7 @@
 package com.manh.ecom_be.responses.order;
 
+import java.math.BigDecimal;
+
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.manh.ecom_be.models.OrderDetail;
@@ -23,13 +25,13 @@ public class OrderDetailResponse {
     private String thumbnail;
 
     @JsonProperty("price")
-    private Float price;
+    private BigDecimal price;
 
     @JsonProperty("number_of_products")
     private int numberOfProducts;
 
     @JsonProperty("total_money")
-    private Float totalMoney;
+    private BigDecimal totalMoney;
 
     private String color;
 
@@ -39,8 +41,10 @@ public class OrderDetailResponse {
                 .id(orderDetail.getId())
                 .orderId(orderDetail.getOrder().getId())
                 .productId(orderDetail.getProduct().getId())
-                .productName(orderDetail.getProduct().getName())
-                .thumbnail(orderDetail.getProduct().getThumbnail())
+                .productName(orderDetail.getProductNameSnapshot() != null
+                        ? orderDetail.getProductNameSnapshot() : orderDetail.getProduct().getName())
+                .thumbnail(orderDetail.getProductNameSnapshot() != null
+                        ? orderDetail.getProductThumbnailSnapshot() : orderDetail.getProduct().getThumbnail())
                 .price(orderDetail.getPrice())
                 .numberOfProducts(orderDetail.getNumberOfProducts())
                 .totalMoney(orderDetail.getTotalMoney())

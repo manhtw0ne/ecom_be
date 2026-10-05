@@ -48,6 +48,7 @@ public class JwtTokenUtils {
 
         try {
             String token = Jwts.builder()
+                    .id(java.util.UUID.randomUUID().toString())
                     .claims(claims)
                     .subject(subject)
                     .expiration(new Date(System.currentTimeMillis() + expiration * 1000L))
@@ -111,7 +112,10 @@ public class JwtTokenUtils {
             Token existingToken = tokenRepository.findByToken(token);
 
             if (existingToken == null ||
-                    existingToken.isRevoked() == true ||
+                    existingToken.isRevoked() || existingToken.isExpired() ||
+                    existingToken.getUser() == null || !userDetails.getId().equals(existingToken.getUser().getId()) ||
+                    existingToken.getExpirationDate() == null ||
+                    !existingToken.getExpirationDate().isAfter(java.time.LocalDateTime.now()) ||
                     !userDetails.isActive()) {
                 return false;
             }

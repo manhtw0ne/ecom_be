@@ -10,5 +10,10 @@ import java.util.Optional;
 public interface TokenRepository extends JpaRepository<Token, Long> {
     List<Token> findByUser(User user);
     Token findByToken(String token);
-    Token findByRefreshToken(String refreshToken);
+    @org.springframework.data.jpa.repository.Query("select t.user.id from Token t where t.refreshToken = :value")
+    Optional<Long> findOwnerIdByRefreshToken(@org.springframework.data.repository.query.Param("value") String value);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select t from Token t where t.refreshToken = :value")
+    Optional<Token> findByRefreshTokenForUpdate(@org.springframework.data.repository.query.Param("value") String value);
 }
