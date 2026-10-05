@@ -1,0 +1,76 @@
+# Render.com deployment configuration
+# Docs: https://render.com/docs/yaml-spec
+#
+# Free tier notes:
+# - Web service spins down after 15 min inactivity (cold start ~30s)
+# - MySQL: use PlanetScale free tier (https://planetscale.com) or Render managed DB
+# - Redis: use Upstash free tier (https://upstash.com)
+# - Kafka: disabled in cloud demo (KAFKA_BOOTSTRAP_SERVERS left unset uses health-check bypass)
+#
+# Setup steps:
+# 1. Fork/push repo to GitHub
+# 2. Connect repo to Render dashboard
+# 3. Set the environment variables marked [REQUIRED] below
+# 4. Deploy — Flyway runs migrations automatically on first start
+
+services:
+  - type: web
+    name: ecom-be
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free          # upgrade to starter ($7/mo) for always-on
+    healthCheckPath: /api/v1/actuator/health/liveness
+    autoDeploy: true    # redeploy on push to main
+
+    envVars:
+      # ── Spring ──────────────────────────────────────────────────────
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+      # ── Database [REQUIRED] ──────────────────────────────────────────
+      # Use Render Managed DB or PlanetScale (free tier)
+      # Format: jdbc:mysql://<host>:<port>/<dbname>?useSSL=true&serverTimezone=UTC
+      - key: DB_URL
+        sync: false     # set manually in Render dashboard
+
+      - key: DB_USERNAME
+        sync: false
+
+      - key: DB_PASSWORD
+        sync: false
+
+      # ── JWT [REQUIRED] ───────────────────────────────────────────────
+      # Generate: openssl rand -base64 32
+      - key: JWT_SECRET
+        sync: false
+
+      # ── Redis (Upstash free tier) [REQUIRED] ─────────────────────────
+      # Format: rediss://:password@host:port  (note: rediss:// for TLS)
+      - key: REDIS_HOST
+        sync: false
+
+      - key: REDIS_PORT
+        value: "6379"
+
+      - key: REDIS_PASSWORD
+        sync: false
+
+      # ── CORS ─────────────────────────────────────────────────────────
+      # Set to your frontend URL. Leave empty to deny all cross-origin.
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
+
+      # ── Kafka (optional — disable for cloud demo) ────────────────────
+      # Leave unset to use the health-check bypass (graceful degradation)
+      # - key: KAFKA_BOOTSTRAP_SERVERS
+      #   value: ""
+
+      # ── Email (optional) ─────────────────────────────────────────────
+      - key: MAIL_ENABLED
+        value: "false"
+
+      # ── VNPay (optional) ─────────────────────────────────────────────
+      - key: VNPAY_TMN_CODE
+        value: disabled
+      - key: VNPAY_SECRET_KEY
+        value: disabled

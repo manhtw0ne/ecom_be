@@ -1,7 +1,8 @@
-﻿# ─────────────────────────────────────────────────────────────────────────────
-# Production Profile — requires the following environment variables:
-#   DB_URL, DB_USERNAME, DB_PASSWORD, JWT_SECRET
+# ─────────────────────────────────────────────────────────────────────────────
+# Production Profile
+# Required env vars: DB_URL, DB_USERNAME, DB_PASSWORD, JWT_SECRET
 # Optional: REDIS_HOST, REDIS_PASSWORD, KAFKA_BOOTSTRAP_SERVERS
+# Cloud Redis (Upstash): also set SPRING_DATA_REDIS_SSL_ENABLED=true
 # ─────────────────────────────────────────────────────────────────────────────
 spring:
   datasource:
@@ -15,15 +16,29 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        # Set SPRING_DATA_REDIS_SSL_ENABLED=true when using Upstash or other TLS Redis
+        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
 jwt:
   secretKey: ${JWT_SECRET}
 
-# Swagger UI is disabled in production for security
+# Swagger UI disabled in prod — enable for demo with SPRINGDOC_SWAGGER_UI_ENABLED=true
 springdoc:
   swagger-ui:
-    enabled: false
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+    path: /swagger-ui.html
   api-docs:
-    enabled: false
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+    path: /api-docs
 
 logging:
   level:
@@ -32,7 +47,7 @@ logging:
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
 
-# Production server forward headers (behind Nginx/proxy)
+# Production server: behind Nginx/Render proxy
 server:
   forward-headers-strategy: framework
 
